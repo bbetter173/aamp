@@ -20,7 +20,7 @@
 
 /**
  * @file AudioCMCDHeaders.h
- * @brief AudioCMCDHeaders Values
+ * @brief CMCD headers for audio segments (ot=a, i for init)
  */
 
 #ifndef AudioCMCDHeaders_h
@@ -34,11 +34,20 @@
  */
 class AudioCMCDHeaders: public CMCDHeaders
 {
-
 public:
 	AudioCMCDHeaders() : CMCDHeaders() {}
-	void BuildCMCDCustomHeaders(std::unordered_map<std::string, std::vector<std::string>> &mCMCDCustomHeaders);
-	~AudioCMCDHeaders() {}
+
+protected:
+	std::string ObjectTypeToken() const override
+	{
+		if (mediaType == "INIT_AUDIO")
+		{
+			return "i";
+		}
+		return "a";
+	}
+
+	bool HasSegmentMetrics() const override { return true; }
 };
 
 #endif

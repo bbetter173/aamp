@@ -20,7 +20,7 @@
 
 /**
  * @file ManifestCMCDHeaders.h
- * @brief ManifestCMCDHeaders Values
+ * @brief CMCD headers for manifest/playlist requests (ot=m)
  */
 
 #ifndef ManifestCMCDHeaders_h
@@ -34,11 +34,11 @@
  */
 class ManifestCMCDHeaders: public CMCDHeaders
 {
-
 public:
 	ManifestCMCDHeaders() : CMCDHeaders() {}
-	void BuildCMCDCustomHeaders(std::unordered_map<std::string, std::vector<std::string>> &mCMCDCustomHeaders);
-	~ManifestCMCDHeaders() {}
+
+protected:
+	std::string ObjectTypeToken() const override { return "m"; }
 };
 
 #endif

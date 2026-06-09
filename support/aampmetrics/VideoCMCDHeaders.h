@@ -20,7 +20,7 @@
 
 /**
  * @file VideoCMCDHeaders.h
- * @brief VideoCMCDHeader Values
+ * @brief CMCD headers for video segments (ot=v, i for init, av for muxed)
  */
 
 #ifndef VideoCMCDHeaders_h
@@ -34,11 +34,24 @@
  */
 class VideoCMCDHeaders: public CMCDHeaders
 {
-
 public:
 	VideoCMCDHeaders() : CMCDHeaders() {}
-	void BuildCMCDCustomHeaders(std::unordered_map<std::string, std::vector<std::string>> &mCMCDCustomHeaders);
-	~VideoCMCDHeaders() {}
+
+protected:
+	std::string ObjectTypeToken() const override
+	{
+		if (mediaType == "INIT_VIDEO")
+		{
+			return "i";
+		}
+		if (mediaType == "MUXED")
+		{
+			return "av";
+		}
+		return "v";
+	}
+
+	bool HasSegmentMetrics() const override { return true; }
 };
 
 #endif

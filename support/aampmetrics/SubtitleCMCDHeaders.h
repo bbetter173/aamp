@@ -20,7 +20,7 @@
 
 /**
  * @file SubtitleCMCDHeaders.h
- * @brief SubtitleCMCDHeaders values
+ * @brief CMCD headers for subtitle requests (ot=s)
  */
 
 #ifndef SubtitleCMCDHeaders_h
@@ -34,11 +34,11 @@
  */
 class SubtitleCMCDHeaders: public CMCDHeaders
 {
-
 public:
 	SubtitleCMCDHeaders() : CMCDHeaders() {}
-	void BuildCMCDCustomHeaders(std::unordered_map<std::string, std::vector<std::string>> &mCMCDCustomHeaders);
-	~SubtitleCMCDHeaders() {}
+
+protected:
+	std::string ObjectTypeToken() const override { return "s"; }
 };
 
 #endif
