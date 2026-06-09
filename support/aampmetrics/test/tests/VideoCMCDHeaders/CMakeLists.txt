@@ -33,7 +33,8 @@ include_directories(${GMOCK_INCLUDE_DIRS})
 
 set(TEST_SOURCES    VideoCMCDHeadersGTest.cpp
                     VideoCMCDHeadersTest.cpp)
-set(ABR_SOURCES ${AAMPMETRICS_ROOT}/VideoCMCDHeaders.cpp )
+set(ABR_SOURCES ${AAMPMETRICS_ROOT}/CMCDHeaders.cpp
+                ${AAMPMETRICS_ROOT}/CMCDSerializer.cpp)
 
 add_executable(${EXEC_NAME}
                ${TEST_SOURCES}
@@ -55,6 +56,6 @@ if (COVERAGE_ENABLED)
                               DEPENDENCIES ${EXEC_NAME})
 endif()
 
-target_link_libraries(${EXEC_NAME} Fake ${GMOCK_LINK_LIBRARIES} ${GTEST_LINK_LIBRARIES})
+target_link_libraries(${EXEC_NAME} ${GMOCK_LINK_LIBRARIES} ${GTEST_LINK_LIBRARIES})
 gtest_discover_tests(${EXEC_NAME} TEST_PREFIX ${EXEC_NAME}:)
 

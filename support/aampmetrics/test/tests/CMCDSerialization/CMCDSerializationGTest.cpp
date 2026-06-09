@@ -2,7 +2,7 @@
 * If not stated otherwise in this file or this component's license file the
 * following copyright and licenses apply:
 *
-* Copyright 2023 RDK Management
+* Copyright 2024 RDK Management
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -16,8 +16,11 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-#include "SubtitleCMCDHeaders.h"
 
-void SubtitleCMCDHeaders::BuildCMCDCustomHeaders(std::unordered_map<std::string, std::vector<std::string>> &mCMCDCustomHeaders)
+#include <gtest/gtest.h>
+
+int main(int argc, char** argv)
 {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

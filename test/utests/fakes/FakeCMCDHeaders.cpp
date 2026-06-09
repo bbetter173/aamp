@@ -69,3 +69,6 @@ void CMCDHeaders::BuildCMCDCustomHeaders(std::unordered_map<std::string, std::ve
 {
 }
 
+void CMCDHeaders::SetNextRange(const std::string &nextrange)
+{
+}
