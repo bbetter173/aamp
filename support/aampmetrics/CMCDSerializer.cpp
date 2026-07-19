@@ -75,6 +75,53 @@ std::string CMCDGroupToHeaderKey(CMCDGroup group)
     return "CMCD-Object:";
 }
 
+/**
+ * @brief Split a comma-delimited CMCD group value into tokens, ignoring commas
+ *        inside quoted strings.
+ *
+ * Quoted-string values (sid/cid/nor/nrr) may legally contain commas, so a naive
+ * find(',') split would cut a token in half. Tracks double-quote state and skips
+ * the character after a backslash (QuoteString escapes '"' and '\\' with '\\').
+ * Appends the resulting tokens to tokens.
+ */
+static void SplitTokensQuoteAware(const std::string& value, std::vector<std::string>& tokens)
+{
+    std::string current;
+    bool inQuotes = false;
+    bool escaped = false;
+    for (char c : value)
+    {
+        if (escaped)
+        {
+            current += c;
+            escaped = false;
+        }
+        else if (inQuotes && c == '\\')
+        {
+            current += c;
+            escaped = true;
+        }
+        else if (c == '"')
+        {
+            current += c;
+            inQuotes = !inQuotes;
+        }
+        else if (c == ',' && !inQuotes)
+        {
+            tokens.push_back(current);
+            current.clear();
+        }
+        else
+        {
+            current += c;
+        }
+    }
+    if (!current.empty())
+    {
+        tokens.push_back(current);
+    }
+}
+
 void SerializeToCMCDMap(const std::vector<CMCDEntry>& entries,
                         std::unordered_map<std::string, std::vector<std::string>>& out)
 {
@@ -159,36 +206,8 @@ void SerializeToCMCDMap(const std::vector<CMCDEntry>& entries,
         {
             // Pre-existing entry present — merge tokens and re-sort by key.
             std::vector<std::string> tokens;
-
-            // Split existing comma-delimited tokens.
-            const std::string& existing = it->second.at(0);
-            std::size_t start = 0;
-            while (start < existing.size())
-            {
-                std::size_t comma = existing.find(',', start);
-                if (comma == std::string::npos)
-                {
-                    tokens.push_back(existing.substr(start));
-                    break;
-                }
-                tokens.push_back(existing.substr(start, comma - start));
-                start = comma + 1;
-            }
-
-            // Split new tokens from this call.
-            const std::string& incoming = kv.second;
-            start = 0;
-            while (start < incoming.size())
-            {
-                std::size_t comma = incoming.find(',', start);
-                if (comma == std::string::npos)
-                {
-                    tokens.push_back(incoming.substr(start));
-                    break;
-                }
-                tokens.push_back(incoming.substr(start, comma - start));
-                start = comma + 1;
-            }
+            SplitTokensQuoteAware(it->second.at(0), tokens);
+            SplitTokensQuoteAware(kv.second, tokens);
 
             // Sort all tokens alphabetically by their CMCD key name.
             // For a token like "br=3800" the key is "br"; for bare "bs" the key is "bs".

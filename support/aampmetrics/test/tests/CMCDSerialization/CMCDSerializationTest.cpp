@@ -928,6 +928,61 @@ TEST(CMCDSerialization_Merge, TwoCallsSameGroupMergesAndSorts)
     EXPECT_THAT(session, HasSubstr("sid=\"my-session\""));
 }
 
+/**
+ * Merge must not split a quoted value on an interior comma. Quoted-string
+ * keys (cid/nor/nrr/sid) may legally contain commas; the merge path re-splits
+ * the pre-existing group value into tokens, and a naive find(',') split would
+ * cut the quoted value in half and corrupt the re-sorted output.
+ */
+TEST(CMCDSerialization_Merge, MergePreservesQuotedValueWithComma)
+{
+    std::unordered_map<std::string, std::vector<std::string>> out;
+
+    // First call: seed CMCD-Session with a cid whose URL contains commas.
+    std::vector<CMCDEntry> first{
+        CMCDEntry{"cid", "https://cdn.example.com/a,b,c/master.m3u8", CMCDGroup::Session, false, true}
+    };
+    SerializeToCMCDMap(first, out);
+    ASSERT_EQ(out.at("CMCD-Session:").at(0), "cid=\"https://cdn.example.com/a,b,c/master.m3u8\"");
+
+    // Second call: add sf to the same group, forcing the merge/re-sort path
+    // to split the pre-existing value back into tokens.
+    std::vector<CMCDEntry> second{
+        CMCDEntry{"sf", "h", CMCDGroup::Session}
+    };
+    SerializeToCMCDMap(second, out);
+
+    // cid must survive intact (commas inside quotes are not token separators),
+    // alpha-sorted ahead of sf.
+    EXPECT_EQ(JoinedValue(out, "CMCD-Session:"),
+              "cid=\"https://cdn.example.com/a,b,c/master.m3u8\",sf=h")
+        << "quoted cid must not be split on its interior commas by the merge path";
+}
+
+/**
+ * Same guard for escaped quotes: a quoted value containing an escaped '"'
+ * followed by a comma must not terminate the quoted region early.
+ */
+TEST(CMCDSerialization_Merge, MergePreservesEscapedQuoteBeforeComma)
+{
+    std::unordered_map<std::string, std::vector<std::string>> out;
+
+    // Value contains an escaped quote then a comma: serialized as sid="a\",b"
+    std::vector<CMCDEntry> first{
+        CMCDEntry{"sid", "a\",b", CMCDGroup::Session, false, true}
+    };
+    SerializeToCMCDMap(first, out);
+    ASSERT_EQ(out.at("CMCD-Session:").at(0), "sid=\"a\\\",b\"");
+
+    std::vector<CMCDEntry> second{
+        CMCDEntry{"sf", "h", CMCDGroup::Session}
+    };
+    SerializeToCMCDMap(second, out);
+
+    EXPECT_EQ(JoinedValue(out, "CMCD-Session:"), "sf=h,sid=\"a\\\",b\"")
+        << "escaped quote inside a quoted value must not end the quoted region";
+}
+
 // ---------------------------------------------------------------------------
 // All-six-key lock-in: cid<pr<sf<sid<st<v simultaneously present
 // ---------------------------------------------------------------------------
