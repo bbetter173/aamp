@@ -1248,6 +1248,42 @@ TEST(CMCDSerialization_Request, KEYS05_SuOmittedWhenFalse)
     EXPECT_THAT(JoinedValue(headers, "CMCD-Request:"), ::testing::Not(HasSubstr("su")));
 }
 
+/**
+ * KEYS05_SuOnInitSegmentInstance: an INIT_VIDEO-typed instance with startup
+ * urgency set emits ot=i AND the bare su token together. Locks the engine
+ * contract that SetCMCDTrackData pushes su to the INIT_* instances so init
+ * requests fetched at startup/rebuffer are marked urgent (CTA-5004 su).
+ * Everything else stays omitted: the engine never feeds br/tb/bl/d/dl/mtp
+ * to INIT instances, so CMCD-Request must contain only the su token.
+ */
+TEST(CMCDSerialization_Request, KEYS05_SuOnInitSegmentInstance)
+{
+    VideoCMCDHeaders v;
+    v.SetSessionId("test-sid");
+    v.SetMediaType("INIT_VIDEO");  // -> ot=i
+    v.SetStartupUrgent(true);
+
+    auto headers = BuildHeaders(v);
+    EXPECT_THAT(JoinedValue(headers, "CMCD-Object:"), HasSubstr("ot=i"));
+    EXPECT_EQ(JoinedValue(headers, "CMCD-Request:"), "su");
+}
+
+/**
+ * KEYS05_SuOnInitAudioInstance: same contract for the audio init instance
+ * (AudioCMCDHeaders with media type INIT_AUDIO -> ot=i).
+ */
+TEST(CMCDSerialization_Request, KEYS05_SuOnInitAudioInstance)
+{
+    AudioCMCDHeaders a;
+    a.SetSessionId("test-sid");
+    a.SetMediaType("INIT_AUDIO");  // -> ot=i
+    a.SetStartupUrgent(true);
+
+    auto headers = BuildHeaders(a);
+    EXPECT_THAT(JoinedValue(headers, "CMCD-Object:"), HasSubstr("ot=i"));
+    EXPECT_EQ(JoinedValue(headers, "CMCD-Request:"), "su");
+}
+
 // ---------------------------------------------------------------------------
 // rtp — requested max throughput, bitrate*2 rounded 100 kbps
 // ---------------------------------------------------------------------------

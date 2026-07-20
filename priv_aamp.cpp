@@ -3987,6 +3987,23 @@ void PrivateInstanceAAMP::SetCMCDTrackData(AampMediaType mediaType)
 			currentBitrate = mpStreamAbstractionAAMP->GetAudioBitrate();
 			mediaTrack = mpStreamAbstractionAAMP->GetMediaTrack(eTRACK_AUDIO);
 			break;
+		case eMEDIATYPE_INIT_VIDEO:
+		case eMEDIATYPE_INIT_AUDIO:
+		{
+			// su on init-segment requests: init objects are fetched at startup, seek,
+			// profile switch and rebuffer recovery, so CTA-5004 startup-urgency applies
+			// to them too. Only su is pushed to the INIT_* instances — the remaining
+			// segment metrics (br/tb/bl/d/dl/mtp) stay unset there and are omitted per
+			// the optional-key rule. Buffer state comes from the parent media track.
+			MediaTrack *parentTrack = mpStreamAbstractionAAMP ? mpStreamAbstractionAAMP->GetMediaTrack(
+					(mediaType == eMEDIATYPE_INIT_VIDEO) ? eTRACK_VIDEO : eTRACK_AUDIO) : NULL;
+			bool bufferRedStatus = parentTrack && (parentTrack->GetBufferStatus() == BUFFER_STATUS_RED);
+			if (mCMCDCollector)
+			{
+				mCMCDCollector->CMCDSetStartupUrgent(mediaType, bufferRedStatus || IsTuneTypeNew);
+			}
+			break;
+		}
 		default:
 			break;
 	}
@@ -4163,24 +4180,18 @@ bool PrivateInstanceAAMP::GetFile( std::string remoteUrl, AampMediaType mediaTyp
 			}
 
 			std::vector<std::string> cmcdCustomHeader;
-			AampMediaType mmediaT;
-			mmediaT = (mediaType == eMEDIATYPE_INIT_VIDEO) ? eMEDIATYPE_VIDEO : (mediaType == eMEDIATYPE_INIT_AUDIO) ? eMEDIATYPE_AUDIO :mediaType;
 			// d: object duration in ms. fragmentDurationS is the GetFile() caller-supplied segment
-			// duration. Emit only for actual media segments; clear (0) on init segments so the prior
-			// media-segment duration does not leak through the shared VIDEO/AUDIO header.
+			// duration. Set only on the media-segment instances; init segments use their own
+			// INIT_VIDEO/INIT_AUDIO instances (ot=i), which never receive a d value.
 			if (mCMCDCollector)
 			{
 				int fragmentDurationMs = (int)(fragmentDurationS * 1000);
 				if (mediaType == eMEDIATYPE_VIDEO || mediaType == eMEDIATYPE_AUDIO)
 				{
-					mCMCDCollector->CMCDSetFragmentDuration(mmediaT, fragmentDurationMs);
-				}
-				else if (mediaType == eMEDIATYPE_INIT_VIDEO || mediaType == eMEDIATYPE_INIT_AUDIO)
-				{
-					mCMCDCollector->CMCDSetFragmentDuration(mmediaT, 0);
+					mCMCDCollector->CMCDSetFragmentDuration(mediaType, fragmentDurationMs);
 				}
 			}
-			mCMCDCollector->CMCDGetHeaders(mmediaT,cmcdCustomHeader);
+			mCMCDCollector->CMCDGetHeaders(mediaType,cmcdCustomHeader);
 
 			if (cmcdCustomHeader.size() > 0)
 			{
