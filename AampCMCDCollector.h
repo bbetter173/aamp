@@ -110,9 +110,13 @@ public:
 	/**
 	 * @brief CMCDGetHeaders Get the CMCD headers to add in download request
 	 *
+	 * @param[in] mediaType - media type of the request
+	 * @param[out] customHeader - CMCD header lines to attach to the request
+	 * @param[in] currentUrl - URL of the request the headers ride on; used to
+	 *            express nor as a relative reference. When empty, nor is omitted.
 	 * @return None
 	 */
-	void CMCDGetHeaders(AampMediaType mediaType ,  std::vector<std::string> &customHeader);
+	void CMCDGetHeaders(AampMediaType mediaType ,  std::vector<std::string> &customHeader, const std::string &currentUrl = "");
 	void SetBitrates(AampMediaType mediaType,const std::vector<BitsPerSecond> bitrates);
 	void SetTrackData(AampMediaType mediaType,bool bufferRedStatus,int bufferedDuration,int currentBitrate, bool IsMuxed=false);
 
@@ -218,7 +222,7 @@ private:
 	 * @param[in,out] state Per-media-type CMCD state.
 	 * @return Entries ready for serialization (the serializer sorts them).
 	 */
-	std::vector<AampCMCD::Entry> BuildEntries(CMCDState &state) const;
+	std::vector<AampCMCD::Entry> BuildEntries(CMCDState &state, const std::string &currentUrl) const;
 
 	bool bCMCDEnabled;			/**< CMCD enable/disable flag  */
 	typedef std::map<int, CMCDState> StreamTypeCMCD;

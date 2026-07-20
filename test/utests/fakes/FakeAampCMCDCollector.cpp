@@ -77,7 +77,7 @@ void AampCMCDCollector::CMCDSetNextRangeRequest(std::string nextrange,long bandw
 *
 * @return None
 */
-void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader)
+void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader, const std::string &currentUrl)
 {
  }
  

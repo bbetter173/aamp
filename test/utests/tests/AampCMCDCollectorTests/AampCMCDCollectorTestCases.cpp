@@ -46,8 +46,9 @@ using ::testing::UnorderedElementsAre;
 namespace
 {
 	const std::string kTraceId{"test-trace-id"};
-	// Session header before any session params are pushed: sid (quoted) and v=1 only.
-	const std::string kBareSessionHeader{"CMCD-Session: sid=\"" + kTraceId + "\",v=1"};
+	// Session header before any session params are pushed: sid (quoted) only.
+	// v is omitted at its default of 1 per CTA-5004.
+	const std::string kBareSessionHeader{"CMCD-Session: sid=\"" + kTraceId + "\""};
 }
 
 class AampCMCDCollectorTest : public ::testing::Test
@@ -63,10 +64,10 @@ protected:
 		mCollector->Initialize(true, traceId);
 	}
 
-	std::vector<std::string> GetHeaders(AampMediaType mediaType)
+	std::vector<std::string> GetHeaders(AampMediaType mediaType, const std::string &currentUrl = "")
 	{
 		std::vector<std::string> headers;
-		mCollector->CMCDGetHeaders(mediaType, headers);
+		mCollector->CMCDGetHeaders(mediaType, headers, currentUrl);
 		return headers;
 	}
 
@@ -156,15 +157,16 @@ TEST_F(AampCMCDCollectorTest, VideoWithFullState_EmitsAllHeadersSortedAndTyped)
 	mCollector->CMCDSetMeasuredThroughput(eMEDIATYPE_VIDEO, 4321);
 	mCollector->CMCDSetStartupUrgent(eMEDIATYPE_VIDEO, true);
 
-	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO),
+	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO, "http://example.com/seg1.ts"),
 	            UnorderedElementsAre(
 	                // br/tb plain integers (no rounding clause); d plain ms; keys sorted
 	                "CMCD-Object: br=2500,d=6006,ot=v,tb=5000",
 	                // bl rounded to 100 ms; dl = bl / pr(2.0) rounded; mtp rounded to 100 kbps;
-	                // nor quoted; su bare token; vendor keys plain unrounded
-	                "CMCD-Request: bl=3000,com.comcast-dns=12,com.comcast-fb=34,com.comcast-lb=56,dl=1500,mtp=4300,nor=\"http://example.com/seg2.ts\",su",
-	                // cid stripped of the query string and quoted; pr=2; sf=d; st=l
-	                "CMCD-Session: cid=\"http://example.com/master.mpd\",pr=2,sf=d,sid=\"" + kTraceId + "\",st=l,v=1",
+	                // nor relative to the current request and quoted; su bare token;
+	                // vendor keys plain unrounded
+	                "CMCD-Request: bl=3000,com.comcast-dns=12,com.comcast-fb=34,com.comcast-lb=56,dl=1500,mtp=4300,nor=\"seg2.ts\",su",
+	                // cid stripped of the query string and quoted; pr=2; sf=d; st=l; v omitted at 1
+	                "CMCD-Session: cid=\"http://example.com/master.mpd\",pr=2,sf=d,sid=\"" + kTraceId + "\",st=l",
 	                // bs latched from the starved SetTrackData; rtp = 2 x br rounded
 	                "CMCD-Status: bs,rtp=5000"));
 }
@@ -187,8 +189,30 @@ TEST_F(AampCMCDCollectorTest, DnsUnavailable_OmitsDnsKey)
 	mCollector->CMCDSetNextObjectRequest("http://example.com/seg2.ts", 2500000, eMEDIATYPE_VIDEO);
 	mCollector->CMCDSetNetworkMetrics(eMEDIATYPE_VIDEO, 34, 56, 0);
 
+	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO, "http://example.com/seg1.ts"),
+	            Contains("CMCD-Request: com.comcast-fb=34,com.comcast-lb=56,nor=\"seg2.ts\""));
+}
+
+TEST_F(AampCMCDCollectorTest, NextObjectUrl_RelativizedToCurrentRequest)
+{
+	InitEnabled();
+	mCollector->CMCDSetNextObjectRequest("http://example.com/hls/seg2.ts", 2500000, eMEDIATYPE_VIDEO);
+
+	// Same directory: nor is just the segment name.
+	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO, "http://example.com/hls/seg1.ts"),
+	            Contains("CMCD-Request: com.comcast-fb=0,com.comcast-lb=0,nor=\"seg2.ts\""));
+
+	// Same origin, different directory: absolute-path reference.
+	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO, "http://example.com/other/seg1.ts"),
+	            Contains("CMCD-Request: com.comcast-fb=0,com.comcast-lb=0,nor=\"/hls/seg2.ts\""));
+
+	// Different origin: not expressible as a relative reference - nor omitted.
+	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO, "http://cdn2.example.net/hls/seg1.ts"),
+	            Contains("CMCD-Request: com.comcast-fb=0,com.comcast-lb=0"));
+
+	// No current URL known: nor omitted.
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_VIDEO),
-	            Contains("CMCD-Request: com.comcast-fb=34,com.comcast-lb=56,nor=\"http://example.com/seg2.ts\""));
+	            Contains("CMCD-Request: com.comcast-fb=0,com.comcast-lb=0"));
 }
 
 TEST_F(AampCMCDCollectorTest, NextRange_EmitsNrrInsteadOfNor)
@@ -302,11 +326,11 @@ TEST_F(AampCMCDCollectorTest, PlaybackRate_OmittedAtNormalRate)
 	// Any non-1 rate is emitted, including 0 ("not playing").
 	mCollector->CMCDSetPlaybackRate(0.5f);
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: pr=0.5,sid=\"" + kTraceId + "\",v=1"));
+	            Contains("CMCD-Session: pr=0.5,sid=\"" + kTraceId + "\""));
 
 	mCollector->CMCDSetPlaybackRate(0.0f);
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: pr=0,sid=\"" + kTraceId + "\",v=1"));
+	            Contains("CMCD-Session: pr=0,sid=\"" + kTraceId + "\""));
 
 	mCollector->CMCDSetPlaybackRate(1.0f);
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST), Contains(kBareSessionHeader));
@@ -319,7 +343,7 @@ TEST_F(AampCMCDCollectorTest, SessionParams_MapFormatAndStripQueryFromCid)
 
 	// The query string and fragment must not leak into cid.
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: cid=\"http://example.com/master.mpd\",sf=d,sid=\"" + kTraceId + "\",v=1"));
+	            Contains("CMCD-Session: cid=\"http://example.com/master.mpd\",sf=d,sid=\"" + kTraceId + "\""));
 }
 
 TEST_F(AampCMCDCollectorTest, SessionParams_MapHlsToSfH)
@@ -328,7 +352,7 @@ TEST_F(AampCMCDCollectorTest, SessionParams_MapHlsToSfH)
 	mCollector->CMCDSetSessionParams(eMEDIAFORMAT_HLS, "http://example.com/master.m3u8");
 
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: cid=\"http://example.com/master.m3u8\",sf=h,sid=\"" + kTraceId + "\",v=1"));
+	            Contains("CMCD-Session: cid=\"http://example.com/master.m3u8\",sf=h,sid=\"" + kTraceId + "\""));
 }
 
 TEST_F(AampCMCDCollectorTest, LiveStatus_EmitsStreamTypeToken)
@@ -337,12 +361,12 @@ TEST_F(AampCMCDCollectorTest, LiveStatus_EmitsStreamTypeToken)
 	mCollector->CMCDSetLiveStatus(true);
 
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: sid=\"" + kTraceId + "\",st=l,v=1"));
+	            Contains("CMCD-Session: sid=\"" + kTraceId + "\",st=l"));
 
 	mCollector->CMCDSetLiveStatus(false);
 
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: sid=\"" + kTraceId + "\",st=v,v=1"));
+	            Contains("CMCD-Session: sid=\"" + kTraceId + "\",st=v"));
 }
 
 TEST_F(AampCMCDCollectorTest, MeasuredThroughput_RoundedTo100Kbps)
@@ -410,7 +434,7 @@ TEST_F(AampCMCDCollectorTest, UnknownTraceId_GeneratesUuidSessionId)
 	EXPECT_NE(traceId, "unknown");
 	EXPECT_EQ(traceId.length(), 36u);
 	EXPECT_THAT(GetHeaders(eMEDIATYPE_MANIFEST),
-	            Contains("CMCD-Session: sid=\"" + traceId + "\",v=1"));
+	            Contains("CMCD-Session: sid=\"" + traceId + "\""));
 }
 
 TEST_F(AampCMCDCollectorTest, Reinitialize_ResetsCollectedState)

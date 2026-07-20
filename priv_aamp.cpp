@@ -4667,7 +4667,7 @@ bool PrivateInstanceAAMP::GetFile( std::string remoteUrl, AampMediaType mediaTyp
 			{
 				mCMCDCollector->CMCDSetFragmentDuration(mediaType, (int)(fragmentDurationS * 1000));
 			}
-			mCMCDCollector->CMCDGetHeaders(mediaType,cmcdCustomHeader);
+			mCMCDCollector->CMCDGetHeaders(mediaType,cmcdCustomHeader,remoteUrl);
 
 			if (cmcdCustomHeader.size() > 0)
 			{

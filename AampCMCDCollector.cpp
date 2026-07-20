@@ -67,6 +67,43 @@ namespace
 		std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(rate));
 		return std::string(buf);
 	}
+
+	/**
+	 * @brief Express nextUrl as a URI reference relative to currentUrl, for the CMCD nor key.
+	 *
+	 * CTA-5004 defines nor as a path relative to the current request. Same
+	 * directory yields the trailing segment name; the same origin yields an
+	 * absolute-path reference (a valid relative reference per RFC 3986). A
+	 * different origin (or an unparseable URL) cannot be expressed relative to
+	 * the current request, so an empty string is returned and the key omitted.
+	 * Values originate from URLs and are therefore already URL-encoded.
+	 */
+	std::string RelativizeUrl(const std::string &nextUrl, const std::string &currentUrl)
+	{
+		auto pathStart = [](const std::string &url) -> size_t {
+			size_t schemeEnd = url.find("://");
+			return (schemeEnd == std::string::npos) ? std::string::npos : url.find('/', schemeEnd + 3);
+		};
+		const size_t currentPath = pathStart(currentUrl);
+		const size_t nextPath = pathStart(nextUrl);
+		if (currentPath == std::string::npos || nextPath == std::string::npos)
+		{
+			return "";
+		}
+		if (currentPath != nextPath || currentUrl.compare(0, currentPath, nextUrl, 0, nextPath) != 0)
+		{
+			return ""; // different scheme/authority - not expressible as a relative reference
+		}
+		// Directory of the current request: up to the last '/' of the path proper
+		// (query/fragment excluded so a '/' inside them is not mistaken for the path).
+		const size_t queryPos = currentUrl.find_first_of("?#", currentPath);
+		const size_t dirEnd = currentUrl.rfind('/', (queryPos == std::string::npos) ? std::string::npos : queryPos);
+		if (nextUrl.compare(0, dirEnd + 1, currentUrl, 0, dirEnd + 1) == 0)
+		{
+			return nextUrl.substr(dirEnd + 1); // same directory: segment name (plus any query)
+		}
+		return nextUrl.substr(nextPath); // same origin: absolute-path reference
+	}
 }
 
 /**
@@ -156,7 +193,7 @@ void AampCMCDCollector::CMCDSetNextObjectRequest(std::string url,BitsPerSecond C
  * bs/rtp, nor/nrr plus the vendor keys). Unavailable keys are omitted per the
  * CTA-5004 optional-key rule. Consumes the bs latch.
  */
-std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state) const
+std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state, const std::string &currentUrl) const
 {
 	using AampCMCD::Entry;
 	using AampCMCD::HeaderGroup;
@@ -169,8 +206,8 @@ std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state) c
 
 	// sid - String type, always present
 	entries.push_back(Entry{"sid", mTraceId, HeaderGroup::eSESSION, ValueKind::eQUOTED});
-	// v=1 - constant version token, always present
-	entries.push_back(Entry{"v", "1", HeaderGroup::eSESSION, ValueKind::ePLAIN});
+	// v - omitted: CTA-5004 says the version SHOULD only be sent when not equal
+	// to 1, and this implementation is CMCD v1.
 	// sf - omit until the streaming format is known
 	if(!state.streamingFormat.empty())
 	{
@@ -295,15 +332,19 @@ std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state) c
 					entries.push_back(Entry{"rtp", std::to_string(rtpRounded), HeaderGroup::eSTATUS, ValueKind::ePLAIN});
 				}
 			}
-			// nor / nrr - String type keys; AAMP segment paths are URL-safe ASCII so
-			// quoting without percent-encoding is sufficient. The selection precedence
-			// (dns path uses nor; otherwise nrr wins over nor) matches the legacy code;
-			// an unknown next URL is omitted per the CTA-5004 optional-key rule.
+			// nor / nrr - String type keys. nor is the next object expressed relative
+			// to the current request (see RelativizeUrl); it is omitted when the next
+			// URL is unknown or not relativizable. The selection precedence (dns path
+			// uses nor; otherwise nrr wins over nor) matches the legacy code.
 			if(state.dnsLookUpTime > 0 || state.nextRange.empty())
 			{
 				if(!state.nextUrl.empty())
 				{
-					entries.push_back(Entry{"nor", state.nextUrl, HeaderGroup::eREQUEST, ValueKind::eQUOTED});
+					const std::string relativeNext = RelativizeUrl(state.nextUrl, currentUrl);
+					if(!relativeNext.empty())
+					{
+						entries.push_back(Entry{"nor", relativeNext, HeaderGroup::eREQUEST, ValueKind::eQUOTED});
+					}
 				}
 			}
 			else
@@ -332,7 +373,7 @@ std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state) c
  *
  * @return None
  */
-void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader)
+void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader, const std::string &currentUrl)
 {
 	std::lock_guard<std::mutex> lock (myMutex);
 	if(bCMCDEnabled)
@@ -343,7 +384,7 @@ void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std
 			AAMPLOG_INFO("[CMCD][%d]Couldn't find the filetype to Get metrics",mediaType);
 			return;
 		}
-		for(const std::string &headerValue : AampCMCD::SerializeHeaders(BuildEntries(it->second)))
+		for(const std::string &headerValue : AampCMCD::SerializeHeaders(BuildEntries(it->second, currentUrl)))
 		{
 			customHeader.push_back(headerValue);
 			AAMPLOG_TRACE("[CMCD][%d]Header :%s",mediaType,headerValue.c_str());
