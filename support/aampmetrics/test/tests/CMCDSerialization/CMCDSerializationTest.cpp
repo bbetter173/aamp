@@ -1158,6 +1158,43 @@ TEST(CMCDSerialization_Request, KEYS03_DlScaledByRate)
     EXPECT_THAT(JoinedValue(headers, "CMCD-Request:"), HasSubstr("dl=2000"));
 }
 
+/**
+ * KEYS03_DlOmittedWhenNotPlaying: SetPlaybackRate(0.0f) (pr=0, "not playing") ->
+ * CMCD-Request must NOT contain "dl=". CTA-5004 defines dl as the deadline before
+ * a buffer underrun; at rate 0 the buffer is not draining, so no deadline exists
+ * and the OPTIONAL key is omitted. bl is still reported (buffer state is valid),
+ * and pr=0 is emitted in CMCD-Session per its own definition.
+ */
+TEST(CMCDSerialization_Request, KEYS03_DlOmittedWhenNotPlaying)
+{
+    VideoCMCDHeaders v;
+    v.SetSessionId("test-sid");
+    v.SetBufferLength(4000);
+    v.SetPlaybackRate(0.0f);
+
+    auto headers = BuildHeaders(v);
+    const std::string req = JoinedValue(headers, "CMCD-Request:");
+    EXPECT_THAT(req, ::testing::Not(HasSubstr("dl=")));
+    EXPECT_THAT(req, HasSubstr("bl=4000"));
+    EXPECT_THAT(JoinedValue(headers, "CMCD-Session:"), HasSubstr("pr=0"));
+}
+
+/**
+ * KEYS03_DlScaledBySlowRate: SetBufferLength(1000) + SetPlaybackRate(0.25f) ->
+ * dl = int(1000/0.25) = 4000. At slow rates the buffer drains slower, so the
+ * deadline extends — the true |rate| is used with no clamping floor.
+ */
+TEST(CMCDSerialization_Request, KEYS03_DlScaledBySlowRate)
+{
+    VideoCMCDHeaders v;
+    v.SetSessionId("test-sid");
+    v.SetBufferLength(1000);
+    v.SetPlaybackRate(0.25f);
+
+    auto headers = BuildHeaders(v);
+    EXPECT_THAT(JoinedValue(headers, "CMCD-Request:"), HasSubstr("dl=4000"));
+}
+
 // ---------------------------------------------------------------------------
 // mtp — measured throughput, rounded 100 kbps
 // ---------------------------------------------------------------------------

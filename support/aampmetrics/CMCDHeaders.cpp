@@ -23,7 +23,6 @@
  */
 #include "CMCDHeaders.h"
 #include "CMCDSerializer.h"
-#include <algorithm>
 #include <cstdio>
 #include <cmath>
 using namespace std;
@@ -260,13 +259,16 @@ void CMCDHeaders::AppendSegmentEntries(std::vector<CMCDEntry> &entries)
 		entries.push_back(CMCDEntry{"d", std::to_string(mFragmentDuration), CMCDGroup::Object});
 	}
 
-	// dl: deadline in ms = buffered duration / playback rate — isInteger rounds to 100 ms.
-	// kMinRate floor prevents division blow-up at pause/near-zero rate.
-	if (bufferLength > 0)
+	// dl: deadline in ms = buffered duration / |playback rate| — isInteger rounds to 100 ms.
+	// CTA-5004: dl is the "deadline from the request time until the first sample of this
+	// Segment/Object needs to be available in order to not create a buffer underrun". When
+	// not playing (pr=0) the buffer is not draining, so no deadline exists — the key is
+	// omitted (all keys are OPTIONAL). At trick/slow rates the true |rate| scales the drain:
+	// 0.25x drains 4x slower (dl = 4*bl), 2x drains twice as fast (dl = bl/2).
+	static constexpr float kNotPlayingEps = 1e-4f;
+	if (bufferLength > 0 && std::fabs(mPlaybackRate) > kNotPlayingEps)
 	{
-		static constexpr float kMinRate = 0.5f;
-		float safeRate = std::max(std::fabs(mPlaybackRate), kMinRate);
-		int dlMs = static_cast<int>(static_cast<float>(bufferLength) / safeRate);
+		int dlMs = static_cast<int>(static_cast<float>(bufferLength) / std::fabs(mPlaybackRate));
 		entries.push_back(CMCDEntry{"dl", std::to_string(dlMs), CMCDGroup::Request, true});
 	}
 
