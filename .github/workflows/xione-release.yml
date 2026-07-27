@@ -3,16 +3,30 @@ name: XiOne release
 # Publishes the XiOne cross-build as a GitHub Release asset. Downstream repos
 # pin the tarball by URL + sha256 instead of building AAMP themselves.
 #
-# Tags are prefixed `xione-v*` so they never collide with upstream rdkcentral
-# release tags in this fork.
+# Two modes, both prefixed `xione-` so they never collide with upstream rdkcentral
+# tags in this fork:
 #
-# Versioning is semver of the *packaging*, not of AAMP: the artifact is a
-# function of the AAMP commit AND our sysroot/toolchain pins, so no upstream
-# version identifies it. manifest.json inside the tarball records the inputs.
+#   xione-build-<shortsha>  a commit build, published as a PRERELEASE. For pinning
+#                           a specific commit downstream before anything is
+#                           blessed as a version. The tag is disposable — delete
+#                           it and the prerelease when the commit is superseded.
+#   xione-v<semver>         a real release. Semver of the *packaging*, not of AAMP:
+#                           the artifact is a function of the AAMP commit AND our
+#                           sysroot/toolchain pins, so no upstream version
+#                           identifies it.
+#
+# Either way manifest.json inside the tarball records the exact inputs, and the
+# consumer pins url + sha256. Promoting a commit build to a release is just
+# tagging that same commit `xione-v<semver>` and repointing the consumer.
+#
+# The tag-push triggers are what make this usable from a feature branch:
+# workflow_dispatch only works once the workflow is on the default branch.
 
 on:
   push:
-    tags: ["xione-v*"]
+    tags:
+      - "xione-v*"
+      - "xione-build-*"
   workflow_dispatch:
     inputs:
       version:
@@ -51,14 +65,24 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # refs/tags/xione-v0.1.0 -> 0.1.0
-            version="${GITHUB_REF_NAME#xione-v}"
-            tag="${GITHUB_REF_NAME}"
-          else
-            version="${{ inputs.version }}"
-            tag="xione-v${version}"
-          fi
+          prerelease=false
+          case "${{ github.event_name }}" in
+            push)
+              tag="${GITHUB_REF_NAME}"
+              case "$tag" in
+                # xione-build-<shortsha> -> commit build, published as a prerelease
+                xione-build-*) version="${tag#xione-build-}"; prerelease=true ;;
+                # xione-v0.1.0 -> 0.1.0
+                xione-v*)      version="${tag#xione-v}" ;;
+                *) echo "::error::unexpected tag $tag"; exit 1 ;;
+              esac
+              ;;
+            *)
+              version="${{ inputs.version }}"
+              tag="xione-v${version}"
+              ;;
+          esac
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           echo "Publishing $tag (version $version)"
@@ -84,6 +108,11 @@ jobs:
           {
             echo "AAMP cross-built for the Sky XiOne (armv7 NEON hard-float, glibc 2.35)."
             echo
+            if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+              echo "**Commit build**, not a blessed version — published so a specific commit can be"
+              echo "pinned downstream. Promote it by tagging this same commit \`xione-v<semver>\`."
+              echo
+            fi
             echo "Built by \`.github/workflows/xione-release.yml\` from"
             echo "\`bazel build //:aamp --platforms=//bazel/platforms:xione\`."
             echo "See [XIONE-BUILD.md](XIONE-BUILD.md)."
@@ -128,7 +157,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: AAMP XiOne ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.prerelease == 'true' && format('AAMP XiOne commit build {0}', steps.version.outputs.version) || format('AAMP XiOne {0}', steps.version.outputs.version) }}
+          # Commit builds are prereleases: they exist to be pinned, not to be
+          # treated as blessed versions, and they get deleted when superseded.
+          prerelease: ${{ steps.version.outputs.prerelease }}
           body_path: release-notes.md
           files: |
             staging-xione/*.tar.gz
