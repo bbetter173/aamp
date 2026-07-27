@@ -1,0 +1,254 @@
+[
+  {
+    "pkg": "libcjson-dev",
+    "version": "1.7.15-1+deb12u4",
+    "name": "libcjson-dev_1.7.15-1+deb12u4_armhf.deb",
+    "sha256": "4528e35f79068921da7d10547c24d9b8305f3d4d0f6de2d8beb862f769bdceea",
+    "url": "https://snapshot.debian.org/file/fccbe0b363b734860684b6a6a3f3c201f7676f6a"
+  },
+  {
+    "pkg": "libcjson1",
+    "version": "1.7.15-1+deb12u4",
+    "name": "libcjson1_1.7.15-1+deb12u4_armhf.deb",
+    "sha256": "8191c5a99812250bc3cb4bcc00cb082ceb3bbae70a2f4df2187c36ec484d764f",
+    "url": "https://snapshot.debian.org/file/8db3779d2e0edfec88bbcb88a8edef677c2b1644"
+  },
+  {
+    "pkg": "libcurl4-openssl-dev",
+    "version": "7.88.1-10+deb12u14",
+    "name": "libcurl4-openssl-dev_7.88.1-10+deb12u14_armhf.deb",
+    "sha256": "87243b320e2c54d27722443d829689dc6bda0dddb62e2769abbb4874a2851403",
+    "url": "https://snapshot.debian.org/file/92910b09db53fe0c73da81c4700b99a737e22f55"
+  },
+  {
+    "pkg": "libcurl4",
+    "version": "7.88.1-10+deb12u14",
+    "name": "libcurl4_7.88.1-10+deb12u14_armhf.deb",
+    "sha256": "fff6e07fbc7c9594b8961ded6151ce06e674bd436113ee3d325c8bb30c1948af",
+    "url": "https://snapshot.debian.org/file/b8db93a2e779e92f149deb537e4cd3b7e0cbd469"
+  },
+  {
+    "pkg": "libdw-dev",
+    "version": "0.188-2.1",
+    "name": "libdw-dev_0.188-2.1_armhf.deb",
+    "sha256": "d17e9bdde5a445b6eacf440070a4df6f9bbee9d0b6acdad23cb87ebd7a621639",
+    "url": "https://snapshot.debian.org/file/8224644828338cfdea50ec62251cea6c435c0c3c"
+  },
+  {
+    "pkg": "libdw1",
+    "version": "0.188-2.1",
+    "name": "libdw1_0.188-2.1_armhf.deb",
+    "sha256": "1e76247996b1a8dacae6c32a95f1fb38cce0f91095da13ad8893830029a209fc",
+    "url": "https://snapshot.debian.org/file/373713707af1aa9f830f489fa98e135424a63214"
+  },
+  {
+    "pkg": "libelf-dev",
+    "version": "0.188-2.1",
+    "name": "libelf-dev_0.188-2.1_armhf.deb",
+    "sha256": "b5677ce5da56d47ceca4f63a17058b7e6ab862a5a095fa79a4d4e04749e1e831",
+    "url": "https://snapshot.debian.org/file/bbaab254d26ccaf88c4d8f374972e661a43010c6"
+  },
+  {
+    "pkg": "libelf1",
+    "version": "0.188-2.1",
+    "name": "libelf1_0.188-2.1_armhf.deb",
+    "sha256": "74c36e48beb30384d95b4d8e419c295b8339b6a7cf74158933ea838bc7c59612",
+    "url": "https://snapshot.debian.org/file/d0aea8b10a7218d5c3cdb056251037f9eef03612"
+  },
+  {
+    "pkg": "libffi-dev",
+    "version": "3.4.4-1",
+    "name": "libffi-dev_3.4.4-1_armhf.deb",
+    "sha256": "063ae8a7cf5e7e9244f0913fcb322f5a3aff272ee974da6a4ce8bff932af801c",
+    "url": "https://snapshot.debian.org/file/f0630c3ac84e11b05a8085a70213c5a3cbadafd7"
+  },
+  {
+    "pkg": "libffi8",
+    "version": "3.4.4-1",
+    "name": "libffi8_3.4.4-1_armhf.deb",
+    "sha256": "c709b6666a6f166b7aaf98c9e89ab17143d5b1d33e6b545e582b6b5da31ec2bd",
+    "url": "https://snapshot.debian.org/file/7e50b8e2a2e03401e4f29405cb5c505bbb4539cb"
+  },
+  {
+    "pkg": "libglib2.0-0",
+    "version": "2.74.6-2+deb12u9",
+    "name": "libglib2.0-0_2.74.6-2+deb12u9_armhf.deb",
+    "sha256": "0b687efd895b4963445b848a0acb931358f85f636365824c308689b1e920223b",
+    "url": "https://snapshot.debian.org/file/909d33ee904070642a3d5ee810d43399c7c6c8e7"
+  },
+  {
+    "pkg": "libglib2.0-dev",
+    "version": "2.74.6-2+deb12u9",
+    "name": "libglib2.0-dev_2.74.6-2+deb12u9_armhf.deb",
+    "sha256": "c40d2bbff2f758a39ef2432468146b7e29af36e3cde349577e6e229a085fd752",
+    "url": "https://snapshot.debian.org/file/7cecdae21513173ee6a7fd20d8ba64045582c48b"
+  },
+  {
+    "pkg": "libgstreamer-plugins-base1.0-0",
+    "version": "1.18.4-2+deb11u5",
+    "name": "libgstreamer-plugins-base1.0-0_1.18.4-2+deb11u5_armhf.deb",
+    "sha256": "dcd8cdb4b55d004c6261e487677a3086170b43f82cabc924d68d205f3b9f4bd0",
+    "url": "https://snapshot.debian.org/file/8c7ff9e0617f9cb6086aabc04e05b5c7fdaacb8c"
+  },
+  {
+    "pkg": "libgstreamer-plugins-base1.0-dev",
+    "version": "1.18.4-2+deb11u5",
+    "name": "libgstreamer-plugins-base1.0-dev_1.18.4-2+deb11u5_armhf.deb",
+    "sha256": "33329952e161b54ad7aba531180536d6aa98408e30bb6d7003fe7aebcd86c7e0",
+    "url": "https://snapshot.debian.org/file/dbd8abfe0fe70086a2834a60d522dce45ac85a57"
+  },
+  {
+    "pkg": "libgstreamer1.0-0",
+    "version": "1.18.4-2.1+deb11u1",
+    "name": "libgstreamer1.0-0_1.18.4-2.1+deb11u1_armhf.deb",
+    "sha256": "b8b0f016c411260126925a8315e63201cdc8b0ee9167d5f3db771e328af75263",
+    "url": "https://snapshot.debian.org/file/c5a31fff1ba2346f340b649056d573230674ecd2"
+  },
+  {
+    "pkg": "libgstreamer1.0-dev",
+    "version": "1.18.4-2.1+deb11u1",
+    "name": "libgstreamer1.0-dev_1.18.4-2.1+deb11u1_armhf.deb",
+    "sha256": "01e14c5c527a9cb70cb7463307e11d86a4b3e92ad8dfa49ef1da7170ea774e7b",
+    "url": "https://snapshot.debian.org/file/b7edc572dd04a1a391b05360bccac8c82b702874"
+  },
+  {
+    "pkg": "libicu-dev",
+    "version": "72.1-3+deb12u1",
+    "name": "libicu-dev_72.1-3+deb12u1_armhf.deb",
+    "sha256": "f90ba7c443439329b643452518de98466bae90d0d317c03454c18035c022d922",
+    "url": "https://snapshot.debian.org/file/f8bc2246c626c59debcd0340cce5ac3832f21958"
+  },
+  {
+    "pkg": "libicu72",
+    "version": "72.1-3+deb12u1",
+    "name": "libicu72_72.1-3+deb12u1_armhf.deb",
+    "sha256": "fbb0b414ecf8054b07ff927fd4dca94f21ac6856dcc6fd41a077367032616693",
+    "url": "https://snapshot.debian.org/file/610747771adc5e509d5f8a9659fdf2a914486d26"
+  },
+  {
+    "pkg": "liblzma-dev",
+    "version": "5.4.1-1+deb12u1",
+    "name": "liblzma-dev_5.4.1-1+deb12u1_armhf.deb",
+    "sha256": "33680b21c5a648c47e27f310d4c8df0c15ad658704e58df44d21438fb6fbbb46",
+    "url": "https://snapshot.debian.org/file/3f27d6a3662b2c99b58e07ab0fb6836cc53d90b8"
+  },
+  {
+    "pkg": "liblzma5",
+    "version": "5.4.1-1+deb12u1",
+    "name": "liblzma5_5.4.1-1+deb12u1_armhf.deb",
+    "sha256": "bfbb78b257213e3d66a8c5940c1f5e922dc3bad5c427c9077324657a5eb78e00",
+    "url": "https://snapshot.debian.org/file/5b26055442f46507fba7ff9fbae3fd5032d2ca97"
+  },
+  {
+    "pkg": "liborc-0.4-0",
+    "version": "1:0.4.33-2",
+    "name": "liborc-0.4-0_0.4.33-2_armhf.deb",
+    "sha256": "0f2dfd34f394e2cbfb35841409979bc35b47e2531df96f405be61dc602303080",
+    "url": "https://snapshot.debian.org/file/0d8a58afe13d608167cc88d39f1c6dc4eec66700"
+  },
+  {
+    "pkg": "liborc-0.4-dev",
+    "version": "1:0.4.33-2",
+    "name": "liborc-0.4-dev_0.4.33-2_armhf.deb",
+    "sha256": "64e591b5801144e87a8122822a05cd4c2c172d266ccabecdd8c52e12b9dbb835",
+    "url": "https://snapshot.debian.org/file/a45a5bc70c5c8692edf0117305086164e15498d3"
+  },
+  {
+    "pkg": "libpcre2-8-0",
+    "version": "10.42-1",
+    "name": "libpcre2-8-0_10.42-1_armhf.deb",
+    "sha256": "71a2a91cf8c22665c596e0426c45ee50815405e20aeedd7627eddeee20bb7a42",
+    "url": "https://snapshot.debian.org/file/eb28f5e87db62eead4b5050cc148f55a2a4a7182"
+  },
+  {
+    "pkg": "libpcre2-dev",
+    "version": "10.42-1",
+    "name": "libpcre2-dev_10.42-1_armhf.deb",
+    "sha256": "878fdc77ee6ee3d11ada53c98bf576294c207e25bbb19c167b23917081277790",
+    "url": "https://snapshot.debian.org/file/fa1ad517708bef8480858906d80c590ed4486483"
+  },
+  {
+    "pkg": "libssl-dev",
+    "version": "3.0.20-1~deb12u1",
+    "name": "libssl-dev_3.0.20-1~deb12u1_armhf.deb",
+    "sha256": "300d6c8fb53d345cbed5527974046b8cd9a7bf6929a7509408baf940281b1d76",
+    "url": "https://snapshot.debian.org/file/b2284fc049fb401ea572c89bf2fdc3d84bdba3e7"
+  },
+  {
+    "pkg": "libssl3",
+    "version": "3.0.20-1~deb12u1",
+    "name": "libssl3_3.0.20-1~deb12u1_armhf.deb",
+    "sha256": "97ec1b5fc1ed427351e63657b5a147028689ee7e535a0be555234b01c7cc8bfe",
+    "url": "https://snapshot.debian.org/file/549bfbe6c1a1bc1dd77cd58f0fbcae93d6a862fa"
+  },
+  {
+    "pkg": "libsystemd-dev",
+    "version": "252.39-1~deb12u2",
+    "name": "libsystemd-dev_252.39-1~deb12u2_armhf.deb",
+    "sha256": "1b06a10f98154f855d4f4e140a7cc59d0821baf6debd6a943636fbac315f69d5",
+    "url": "https://snapshot.debian.org/file/de3edfcd16cbf0f247d4c6e9cd3451def874daad"
+  },
+  {
+    "pkg": "libsystemd0",
+    "version": "252.39-1~deb12u2",
+    "name": "libsystemd0_252.39-1~deb12u2_armhf.deb",
+    "sha256": "fe49d9caa76c1ebc90210936c3aa85aeb6e9bb283d4128b825519887117fdb4d",
+    "url": "https://snapshot.debian.org/file/61c6d0fcf90324557002df56d5af38ed7d7a0c6c"
+  },
+  {
+    "pkg": "libunwind-dev",
+    "version": "1.6.2-3",
+    "name": "libunwind-dev_1.6.2-3_armhf.deb",
+    "sha256": "cd25f4f1b26cf4b5e6057da852512db0de9dcde8c256df16ae1454c63fbbd399",
+    "url": "https://snapshot.debian.org/file/6f9ca15d6e2b24716a0b7be4cf36ea455b74f23f"
+  },
+  {
+    "pkg": "libunwind8",
+    "version": "1.6.2-3",
+    "name": "libunwind8_1.6.2-3_armhf.deb",
+    "sha256": "aa9670860a4210317313a24115c02e4c42c781e05bb31b87163f9e4fc1fe4e92",
+    "url": "https://snapshot.debian.org/file/5c69ef921aff03fd4449bfb6ead9529b02dadb24"
+  },
+  {
+    "pkg": "libuuid1",
+    "version": "2.38.1-5+deb12u3",
+    "name": "libuuid1_2.38.1-5+deb12u3_armhf.deb",
+    "sha256": "8e7bdaf72a70a29520cae0d3da81ab814a6954b17dedd33d68b7eebcdc9de56c",
+    "url": "https://snapshot.debian.org/file/cd41e8732d39a3dfb29daa43df8d0e76b4bd3793"
+  },
+  {
+    "pkg": "libxml2-dev",
+    "version": "2.9.14+dfsg-1.3~deb12u5",
+    "name": "libxml2-dev_2.9.14+dfsg-1.3~deb12u5_armhf.deb",
+    "sha256": "e0243172d7e6c1a2fc6dcfc47734540dc4264434e38d38d91ede6d453c25f43d",
+    "url": "https://snapshot.debian.org/file/7e006a5809161a3e1347ea016a1ea277cb080bd1"
+  },
+  {
+    "pkg": "libxml2",
+    "version": "2.9.14+dfsg-1.3~deb12u5",
+    "name": "libxml2_2.9.14+dfsg-1.3~deb12u5_armhf.deb",
+    "sha256": "e1d629c810ecff7ca42f13e44038cf5aecb0e7beb7d9884ac21c8c0cf7c65560",
+    "url": "https://snapshot.debian.org/file/81795c28beb8dbce5ce806b0851e716d1a35d1b7"
+  },
+  {
+    "pkg": "uuid-dev",
+    "version": "2.38.1-5+deb12u3",
+    "name": "uuid-dev_2.38.1-5+deb12u3_armhf.deb",
+    "sha256": "b0fe433cc47d29789c25bf60745f108e17e757d8f20fa60f04c04f372d9be907",
+    "url": "https://snapshot.debian.org/file/7948467e2fab0da98cf6a028ce300233b7ea42fe"
+  },
+  {
+    "pkg": "zlib1g-dev",
+    "version": "1:1.2.13.dfsg-1",
+    "name": "zlib1g-dev_1.2.13.dfsg-1_armhf.deb",
+    "sha256": "4fbb63530bb52324d74f42f6d69b6b1c6e3c09bd2cb84cecc121f688191e04f5",
+    "url": "https://snapshot.debian.org/file/2d4eb49ba4426126fe63ac6da42a900739aadd1b"
+  },
+  {
+    "pkg": "zlib1g",
+    "version": "1:1.2.13.dfsg-1",
+    "name": "zlib1g_1.2.13.dfsg-1_armhf.deb",
+    "sha256": "b52fcc443085ff9c676648b4d0fc97cd31b8f119bdd4e7534e50b6e9386502ba",
+    "url": "https://snapshot.debian.org/file/6c41e68750c027f32bb8feb85a54943492d81c52"
+  }
+]

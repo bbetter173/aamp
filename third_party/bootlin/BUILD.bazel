@@ -1,0 +1,42 @@
+# Bootlin armv7-eabihf gcc 11.3 / glibc 2.35 toolchain for the XiOne AAMP build.
+#
+# The toolchain tree is fetched by the `xione_bootlin_toolchain` http_archive
+# in //MODULE.bazel using toolchain.BUILD.bazel (in the fetched repo) as its
+# overlay build file. It is consumed by //:aamp via rules_foreign_cc,
+# which stages it into $EXT_BUILD_DEPS and points cmake/xione-armhf.cmake at it
+# through XIONE_TOOLCHAIN_DIR. See README.md.
+
+package(default_visibility = ["//visibility:public"])
+
+# Convenience alias to the whole fetched toolchain tree.
+alias(
+    name = "toolchain",
+    actual = "@xione_bootlin_toolchain//:all",
+)
+
+# Registers the Bootlin cc_toolchain (defined in the fetched repo, next to its
+# bin/ and lib/) for //bazel/platforms:xione. rules_foreign_cc's cmake() resolves
+# @bazel_tools//tools/cpp:toolchain_type for the target platform at analysis
+# time, so this must exist before //:aamp can be analysed.
+#
+# Exec side is Linux x86_64 only — Bootlin ships x86_64 host binaries, so the
+# cross build cannot run on an arm64 mac exec host (it goes through CI/remote
+# exec or the container, matching how scripts/build-xione.sh works today).
+#
+# Registered in //MODULE.bazel via register_toolchains.
+toolchain(
+    name = "xione_cc_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+        "//bazel/constraints:hard-float",
+        "//bazel/constraints:neon-vfpv4",
+        "//bazel/constraints:xione-stb",
+    ],
+    toolchain = "@xione_bootlin_toolchain//:xione_cc_toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)

@@ -1,0 +1,8 @@
+# Bazel's convenience symlinks live in the workspace root; keep them out of
+# package loading and out of the //:all_srcs glob that feeds the AAMP build.
+bazel-out
+bazel-bin
+bazel-testlogs
+bazel-aamp
+# CMake out-of-tree build dir (see cmake/xione-armhf.cmake).
+build-xione

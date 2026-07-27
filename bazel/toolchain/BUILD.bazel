@@ -1,0 +1,10 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["gcc_toolchain.bzl"])
+
+bzl_library(
+    name = "gcc_toolchain",
+    srcs = ["gcc_toolchain.bzl"],
+)

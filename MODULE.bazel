@@ -1,0 +1,160 @@
+"""Bazel module for the hermetic AAMP cross-build for the Sky XiOne.
+
+This sits alongside the CMake build, which remains the interface RDK maintains
+and the only supported way to build AAMP for a host. Bazel exists here solely to
+drive that CMake build reproducibly for one target — armv7 NEON hard-float
+XiOne — so CI can publish release artifacts with no device and no developer
+machine in the loop. See XIONE-BUILD.md.
+"""
+
+module(
+    name = "aamp",
+    bazel_compatibility = [">=9.1.0"],
+)
+
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.2.18")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# rules_foreign_cc drives AAMP's existing CMake build. Register its hermetic
+# cmake/ninja/make + pkg-config framework toolchains so the host's tools never
+# leak into the cross build (AAMP's configure is pkg_check_modules heavy). List
+# mirrors rules_foreign_cc 0.15.1's own MODULE.bazel.
+foreign_cc_tools = use_extension("@rules_foreign_cc//foreign_cc:extensions.bzl", "tools")
+use_repo(
+    foreign_cc_tools,
+    "cmake_3.31.8_toolchains",
+    "cmake_src",
+    "gettext_runtime",
+    "glib_dev",
+    "glib_src",
+    "gnumake_src",
+    "meson_src",
+    "ninja_1.13.0_toolchains",
+    "ninja_build_src",
+    "pkgconfig_src",
+    "rules_foreign_cc_framework_toolchains",
+)
+
+register_toolchains(
+    "@rules_foreign_cc_framework_toolchains//:all",
+    "@cmake_3.31.8_toolchains//:all",
+    "@ninja_1.13.0_toolchains//:all",
+    # Prefer the host's `make` over building GNU Make from source — the bundled
+    # gnumake source fails to compile against a host LLVM glibc, and our cmake()
+    # builds use the Ninja generator anyway.
+    "@rules_foreign_cc//toolchains:preinstalled_make_toolchain",
+    # Likewise prefer the host's pkg-config. Bootstrapping it from source builds
+    # a vendored glib whose goption.c declares a variable named `bool`; that is
+    # valid C17 but a syntax error under the C23 default of gcc >= 15, so the
+    # source bootstrap fails on any current distro. pkg-config's role here is
+    # only to resolve .pc files, and PKG_CONFIG_SYSROOT_DIR / PKG_CONFIG_LIBDIR
+    # (set on the cmake() targets) pin it to the XiOne sysroot, so the host
+    # binary's own search defaults never participate.
+    "@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain",
+    "@rules_foreign_cc//toolchains:all",
+)
+
+# Bootlin armv7-eabihf gcc 11.3 / glibc 2.35 toolchain — the compiler
+# cmake/xione-armhf.cmake is written for. URL + sha256 match the toolchain
+# scripts/setup-xione-container.sh installs on feat/xione-build-tooling.
+http_archive(
+    name = "xione_bootlin_toolchain",
+    build_file = "//third_party/bootlin:toolchain.BUILD.bazel",
+    # Make the sysroot's glibc ld scripts relocatable. This SDK's ld does not
+    # prepend a relocated --sysroot to a linker script's absolute GROUP paths —
+    # not even for its own default sysroot — so `GROUP ( /lib/libc.so.6 ... )`
+    # escapes to the host x86_64 libc ("file format not recognized") on every
+    # link that uses this sysroot (e.g. //third_party/ethanlog, and AAMP where
+    # this is the winning --sysroot). Prefixing each absolute path with `=`
+    # forces ld to prepend whatever --sysroot is active. Idempotent; scoped to
+    # GROUP/INPUT/AS_NEEDED lines. assemble_sysroot applies the same rewrite to
+    # the merged AAMP sysroot (see //bazel/rules:xione_sysroot.bzl).
+    patch_cmds = [
+        "find arm-buildroot-linux-gnueabihf/sysroot -type f | while read -r f; do" +
+        " if grep -qI 'GNU ld script' \"$f\" 2>/dev/null; then" +
+        " sed -i -E '/GROUP|INPUT|AS_NEEDED/ s#([ (])/#\\1=/#g' \"$f\"; fi; done",
+    ],
+    sha256 = "64329b3e72350ceda65997368395a945ef83769013d82414dc5f2021c33f2d44",
+    strip_prefix = "armv7-eabihf--glibc--stable-2022.08-1",
+    url = "https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--glibc--stable-2022.08-1.tar.bz2",
+)
+
+# Register the Bootlin cc_toolchain for //bazel/platforms:xione. rules_foreign_cc's
+# cmake() resolves @bazel_tools//tools/cpp:toolchain_type at analysis time, so
+# //:aamp needs this even though CMake drives the actual compile.
+register_toolchains("//third_party/bootlin:xione_cc_toolchain")
+
+# The no-harvest XiOne sysroot, assembled from pinned Debian armhf .debs
+# (snapshot.debian.org, url+sha256 in xione-debs.json). Headers + .pc + link
+# stand-in .so's for the AAMP dependency closure — no device harvest, no
+# proprietary binaries. See //third_party/xione_sysroot/README.md.
+deb_sysroot = use_repo_rule("//bazel/repo_rules:deb_sysroot.bzl", "deb_sysroot")
+
+deb_sysroot(
+    name = "xione_sysroot",
+    build_file = "//third_party/xione_sysroot:sysroot.BUILD.bazel",
+    manifest = "//third_party/xione_sysroot:xione-debs.json",
+)
+
+# libdash (bitmovin stable_3_0) + the 12 RDK patches from meta-rdk-ext, applied
+# in order at fetch time from this repo's own scripts/libdash-patches/ (the same
+# set scripts/install_libdash.sh downloads). Cross-built by
+# //third_party/libdash against the XiOne sysroot. CMake project root is the
+# inner libdash/ dir. See //third_party/libdash/README.md.
+http_archive(
+    name = "libdash",
+    build_file = "//third_party/libdash:libdash.BUILD.bazel",
+    # Bazel's built-in patch is stricter than GNU patch and rejects these RDK
+    # patches' fuzz/format; use the system `patch` tool, which applies them clean.
+    patch_args = ["-p1"],
+    patch_tool = "patch",
+    patches = [
+        "//scripts/libdash-patches:0001-libdash-build.patch",
+        "//scripts/libdash-patches:0002-libdash-starttime-uint64.patch",
+        "//scripts/libdash-patches:0003-libdash-presentationTimeOffset-uint64.patch",
+        "//scripts/libdash-patches:0004-Support-of-EventStream.patch",
+        "//scripts/libdash-patches:0005-DELIA-39460-libdash-memleak.patch",
+        "//scripts/libdash-patches:0006-RDK-32003-LLD-Support.patch",
+        "//scripts/libdash-patches:0007-DELIA-51645-Event-Stream-RawAttributes-Support.patch",
+        "//scripts/libdash-patches:0008-DELIA-53263-Use-Label-TAG.patch",
+        "//scripts/libdash-patches:0009-RDK-35134-Support-for-FailoverContent.patch",
+        "//scripts/libdash-patches:0010-RDKAAMP-121-Failover-Tag-on-SegmentTemplate.patch",
+        "//scripts/libdash-patches:0011-RDKAAMP-61-AAMP-low-latency-dash-stream-evaluation.patch",
+        "//scripts/libdash-patches:0012-To-retrieves-the-text-content-of-CDATA-section.patch",
+    ],
+    sha256 = "ddae48eabf03a2be0794e342cc688ad1f83bc61472b849b71ad7d666f653d5df",
+    strip_prefix = "libdash-f5b5d991af5fe5f285e8040c997b755d3d456b0d/libdash",
+    url = "https://github.com/bitmovin/libdash/archive/f5b5d991af5fe5f285e8040c997b755d3d456b0d.tar.gz",
+)
+
+# JavaScriptCore C-API headers + link-stub symbol list for //third_party/jsc,
+# sourced at fetch time from pinned Debian WebKitGTK debs (webkit2gtk
+# 2.50.6-1~deb12u2, armhf): headers from libjavascriptcoregtk-4.1-dev, symbols
+# via nm -D on the libjavascriptcoregtk-4.1-0 runtime .so. WebKitGTK is the only
+# distro source for the classic JSObjectRef C API — WPE's libWPEWebKit exports
+# only the glib jsc_* API.
+jsc_deb = use_repo_rule("//bazel/repo_rules:jsc_deb.bzl", "jsc_deb")
+
+jsc_deb(
+    name = "jsc_deb",
+    headers_sha256 = "cdd638f093bbc4a12c09c4796af28b9c6b7ac57ff6dccdd907d69349211b6486",
+    headers_url = "https://snapshot.debian.org/file/78d42de4871e469f1a0317950f8eb4f32ce1b7e0",
+    symbols_sha256 = "30073789ccf50ac278f147689e05385e4a5f6a99638ce12bdc50744f8f3df7e3",
+    symbols_url = "https://snapshot.debian.org/file/4e5e6046e605774db0a9f14f00bfb091cf2e9703",
+)
+
+# EthanLog client library source, fetched from rdkcentral/Dobby at a pinned
+# commit (hermetic, sha256-pinned) instead of vendored in-tree. Cross-built into
+# libethanlog.so.3 by //third_party/ethanlog. See //bazel/repo_rules:ethanlog_src.bzl.
+ethanlog_src = use_repo_rule("//bazel/repo_rules:ethanlog_src.bzl", "ethanlog_src")
+
+ethanlog_src(
+    name = "ethanlog_src",
+    commit = "375caa0577dbdc712675b3bafb5fa126c4c7adc9",
+    header_sha256 = "17280075a6c3595d2e2cb5391e6e1173d0a04ee8c5f6f036cd465639b70785c4",
+    source_sha256 = "2b0755561d9524c0b91ad8f3710911621272223e2c9d0157669bc9fc6e7156af",
+)

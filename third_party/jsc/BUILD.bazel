@@ -1,0 +1,78 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+# JavaScriptCore / WPE link stub for the XiOne AAMP jsbindings build.
+#
+# libaampjsbindings.so uses ONLY the stable JavaScriptCore C API
+# (<JavaScriptCore/JavaScript.h>), never WPE/WebKit browser APIs. So the build
+# needs neither WPEWebKit source nor the device's prebuilt libWPEWebKit — just
+# the JSC C-API headers and an armv7hf .so that (a) carries the device soname
+# and (b) exports the JSC C API symbols. At runtime the DT_NEEDED binds to the
+# real libWPEWebKit already on the device. This replaces the SSH-harvested
+# libWPEWebKit*.so and libwpe*.so (add-wpe-to-sysroot.sh) with hermetic,
+# device-free artifacts. See README.md.
+#
+# The headers and the exported-symbol list are sourced at fetch time from pinned
+# Debian WebKitGTK debs by @jsc_deb (see //bazel/repo_rules:jsc_deb.bzl), not
+# vendored here.
+
+# JSC C-API headers, for staging into the AAMP sysroot beside the stub .pc. See
+# //third_party/xione_sysroot:aamp_sysroot.
+filegroup(
+    name = "jsc_header_files",
+    srcs = ["@jsc_deb//:headers"],
+    # Cross-only: gating this keeps the @jsc_deb fetch (which needs host `ar`/`nm`)
+    # out of a host `bazel build //...`. Bazel skips incompatible targets in
+    # wildcards, so the fetch only runs under //bazel/platforms:xione. Matches the
+    # cc_binary stub below and //third_party/xione_sysroot.
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+    ],
+)
+
+# Emit a trivial C definition per exported symbol: `k`-prefixed names (JSC
+# constants, e.g. kJSClassDefinitionEmpty) as data, the rest as functions with a
+# __builtin_trap() body. The bodies never run — only the exported symbol names
+# matter for the link — so the stub needs no libc and links freestanding
+# (-nostdlib), sidestepping the target sysroot entirely.
+genrule(
+    name = "wpe_webkit_stub_src",
+    srcs = ["@jsc_deb//:wpe-webkit.syms"],
+    outs = ["wpe_webkit_stub.c"],
+    cmd = (
+        "{ echo '/* Generated from wpe-webkit.syms by //third_party/jsc. Do not edit. */'; " +
+        "awk 'NF{ if ($$0 ~ /^k/) print \"int \" $$0 \" = 0;\"; " +
+        "else print \"void \" $$0 \"(void) { __builtin_trap(); }\" }' $< ; } > $@"
+    ),
+    # Cross-only (see :jsc_header_files): keeps the @jsc_deb fetch out of host wildcards.
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+    ],
+)
+
+# The stub shared object. SONAME libWPEWebKit-1.1.so.0 is the device soname
+# (add-wpe-to-sysroot.sh; the versioned file there is libWPEWebKit-1.1.so.0.2.17)
+# and is what jsbindings' DT_NEEDED records — it must match the real lib on the
+# device for runtime resolution. Re-check if the device image bumps.
+#
+# Freestanding: no CRT, no libc. Build under //bazel/platforms:xione (Bootlin).
+cc_binary(
+    name = "libWPEWebKit-1.1.so.0",
+    srcs = [":wpe_webkit_stub_src"],
+    linkopts = [
+        "-nostdlib",
+        "-Wl,-soname,libWPEWebKit-1.1.so.0",
+    ],
+    linkshared = True,
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+    ],
+)
+
+# The vendored pkg-config file, exposed for staging into the cmake build's
+# PKG_CONFIG_LIBDIR.
+exports_files(["wpe-webkit-1.1.pc"])

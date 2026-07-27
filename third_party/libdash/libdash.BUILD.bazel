@@ -1,0 +1,29 @@
+# Overlay BUILD for the fetched bitmovin libdash source (@libdash). The 12 RDK
+# patches are applied by the http_archive in //MODULE.bazel; the cross-build
+# lives in //third_party/libdash. This just exposes the source tree.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+)
+
+# libdash's public API headers (IMPD.h and the I*.h interface headers, plus the
+# generated config.h). The CMakeLists only `install(TARGETS dash)` — it never
+# installs headers — so they are staged into the AAMP sysroot straight from the
+# source tree (see //third_party/xione_sysroot:aamp_sysroot). AAMP resolves them
+# via `#include "libdash/IMPD.h"`.
+filegroup(
+    name = "public_headers",
+    srcs = glob(["libdash/include/*.h"]),
+)
+
+# libdash's in-tree headers under source/ (xml/, helpers/, …). AAMP includes a
+# handful of these directly (e.g. `#include "libdash/xml/Node.h"`), so they are
+# staged alongside public_headers under usr/include/libdash, preserving their
+# subdirectory structure. See //third_party/xione_sysroot:aamp_sysroot.
+filegroup(
+    name = "source_headers",
+    srcs = glob(["libdash/source/**/*.h"]),
+)

@@ -1,0 +1,18 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+package(default_visibility = ["//visibility:public"])
+
+bzl_library(
+    name = "deb_sysroot",
+    srcs = ["deb_sysroot.bzl"],
+)
+
+bzl_library(
+    name = "ethanlog_src",
+    srcs = ["ethanlog_src.bzl"],
+)
+
+bzl_library(
+    name = "jsc_deb",
+    srcs = ["jsc_deb.bzl"],
+)
