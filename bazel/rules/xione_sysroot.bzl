@@ -8,6 +8,8 @@ physically merged. This rule emits a directory tree artifact that a cmake()
 target consumes via `data`, with XIONE_SYSROOT pointing at its staged path.
 """
 
+_MULTIARCH = "arm-linux-gnueabihf"
+
 def _root_of(files, marker):
     """The directory path up to and including `marker`, from the first file."""
     p = files[0].path
@@ -15,6 +17,44 @@ def _root_of(files, marker):
     if idx == -1:
         fail("assemble_sysroot: marker {} not found in {}".format(marker, p))
     return p[:idx + len(marker)]
+
+def _entries_under(files, prefix):
+    """Sorted unique first path segments below `prefix`, from file paths."""
+    seen = {}
+    for f in files:
+        if f.path.startswith(prefix):
+            seen[f.path[len(prefix):].split("/")[0]] = True
+    return sorted(seen)
+
+def _has_file(files, path):
+    """Whether the exact `path` is present in `files`."""
+    for f in files:
+        if f.path == path:
+            return True
+    return False
+
+def _relative_link(ctx, dest, target):
+    """An unresolved symlink artifact holding the *relative* link dest -> target.
+
+    `declare_symlink` is the only primitive that produces a relative symlink with
+    no host `ln`: repo rules cannot (`ctx.symlink` writes absolute links, which
+    point into the local Bazel cache and dangle on any other runner), and a shell
+    action would need `ln`. Bazel stages such an artifact as the symlink itself,
+    so the assemble action places it with `cp -a`, which preserves link text
+    verbatim.
+    """
+    link = ctx.actions.declare_symlink("{}_links/{}".format(ctx.attr.name, dest))
+    ctx.actions.symlink(output = link, target_path = target)
+    return link
+
+def _stage_link(ctx, cmds, inputs, out, dest, target, replace = False):
+    """Emit the commands staging a relative symlink artifact at `dest`."""
+    link = _relative_link(ctx, dest, target)
+    cmds.append("mkdir -p $(dirname {o}/{d})".format(o = out.path, d = dest))
+    if replace:
+        cmds.append("rm -f {o}/{d}".format(o = out.path, d = dest))
+    cmds.append("cp -a {s} {o}/{d}".format(s = link.path, o = out.path, d = dest))
+    inputs.append(link)
 
 def _impl(ctx):
     out = ctx.actions.declare_directory(ctx.attr.name + "_tree")
@@ -30,6 +70,7 @@ def _impl(ctx):
         # deb-derived tree (headers + .pc + link .so's)
         "cp -a {r}/. {o}/".format(r = deb_root, o = out.path),
     ]
+    inputs = list(deb_files) + list(glibc_files)
 
     # Multiarch fixups: bridge Debian's layout to the Bootlin gcc, which (unlike a
     # Debian-native gcc) searches only <sysroot>/usr/{lib,include} and not the
@@ -41,30 +82,36 @@ def _impl(ctx):
     #  - expose libz.so at usr/lib/libz.so, where CMake's FindZLIB
     #    (PATH_SUFFIXES=lib) looks.
     #
-    # Relative links, so they stay valid through rules_foreign_cc's copy of this
-    # tree. Done here rather than in the deb_sysroot repo rule because a repo rule
-    # cannot create a *relative* symlink without shelling out to `ln`
-    # (`ctx.symlink` produces absolute links) — keeping it here leaves the whole
-    # fetch phase free of host tools.
+    # Relative links (see _relative_link), so they stay valid through
+    # rules_foreign_cc's copy of this tree and carry no host `ln`.
     #
-    # ORDER IS LOAD-BEARING: this must run against the deb tree ALONE, before the
-    # glibc overlay below. The mirror only links names that do not already exist,
-    # and the glibc overlay adds real usr/include entries (sys/, bits/, gnu/, …)
-    # that collide with multiarch ones. Running it after glibc would silently
-    # create fewer links; running it before, then overlaying glibc with `cp -an`
-    # (no-clobber), reproduces the behaviour these consumers were built against.
-    cmds.append(
-        "if [ -d {o}/usr/include/arm-linux-gnueabihf ]; then".format(o = out.path) +
-        " for e in {o}/usr/include/arm-linux-gnueabihf/*; do".format(o = out.path) +
-        " [ -e \"$e\" ] || continue; b=$(basename \"$e\");" +
-        " [ -e \"{o}/usr/include/$b\" ] ||".format(o = out.path) +
-        " ln -sfn \"arm-linux-gnueabihf/$b\" \"{o}/usr/include/$b\";".format(o = out.path) +
-        " done; fi",
-    )
-    cmds.append(
-        "if [ -e {o}/usr/lib/arm-linux-gnueabihf/libz.so ]; then".format(o = out.path) +
-        " ln -sfn arm-linux-gnueabihf/libz.so {o}/usr/lib/libz.so; fi".format(o = out.path),
-    )
+    # Which names get mirrored is decided HERE, at analysis time, from the deb
+    # filegroup — not by a shell loop over the assembled tree. Same outcome, but
+    # the set is visible in the analysis graph, and the load-bearing ordering
+    # below becomes a property of the inputs rather than of command order.
+    #
+    # ORDER IS LOAD-BEARING: the mirror must consider the deb tree ALONE. It only
+    # links names that tree does not already have (`openssl` is the live case),
+    # while the Bootlin glibc overlaid below adds real usr/include entries (sys/,
+    # bits/, gnu/, …) that would collide. Deriving the set from deb_files alone
+    # and staging before the glibc `cp -an` (no-clobber) reproduces the layout
+    # these consumers were built against; a loop run after glibc would silently
+    # link fewer names.
+    deb_include = deb_root + "/usr/include/"
+    have = _entries_under(deb_files, deb_include)
+    for entry in _entries_under(deb_files, deb_include + _MULTIARCH + "/"):
+        if entry not in have:
+            _stage_link(
+                ctx,
+                cmds,
+                inputs,
+                out,
+                "usr/include/" + entry,
+                _MULTIARCH + "/" + entry,
+            )
+
+    if _has_file(deb_files, deb_root + "/usr/lib/" + _MULTIARCH + "/libz.so"):
+        _stage_link(ctx, cmds, inputs, out, "usr/lib/libz.so", _MULTIARCH + "/libz.so")
 
     cmds.extend([
         # Bootlin glibc: headers, CRT/static libs, and the shared libs + loader
@@ -73,8 +120,6 @@ def _impl(ctx):
         "cp -an {g}/usr/lib/. {o}/usr/lib/".format(g = glibc_root, o = out.path),
         "cp -an {g}/lib/. {o}/lib/".format(g = glibc_root, o = out.path),
     ])
-
-    inputs = list(deb_files) + list(glibc_files)
 
     # Individual overlay files placed at explicit destinations. A target may
     # expose several files (e.g. a rules_foreign_cc cmake() emits both an include
@@ -103,10 +148,11 @@ def _impl(ctx):
         cmds.append("cp -a {r}/. {o}/{d}/".format(r = troot, o = out.path, d = dest))
         inputs.extend(tfiles)
 
-    # Relative symlinks (dest -> target), portable through staging.
-    for link, target in ctx.attr.symlinks.items():
-        cmds.append("mkdir -p $(dirname {o}/{l})".format(o = out.path, l = link))
-        cmds.append("ln -sfn {t} {o}/{l}".format(t = target, o = out.path, l = link))
+    # Relative symlinks (dest -> target), portable through staging. Declared as
+    # symlink artifacts (see _relative_link); `replace` keeps the old `ln -sfn`
+    # semantics of winning over anything an overlay already put there.
+    for dest, target in ctx.attr.symlinks.items():
+        _stage_link(ctx, cmds, inputs, out, dest, target, replace = True)
 
     # Make the glibc/deb GNU ld scripts relocatable. ld only auto-prepends the
     # active --sysroot to a linker script's absolute GROUP/INPUT paths when the

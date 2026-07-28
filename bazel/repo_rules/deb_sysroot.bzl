@@ -12,9 +12,9 @@ host binutils: one `ctx.extract` for the ar members, a second for the payload.
 This rule uses **no host tools at all** — only `ctx.download`, `ctx.extract` and
 `ctx.file`. The multiarch fixups that bridge Debian's layout to the Bootlin gcc
 live in //bazel/rules:xione_sysroot.bzl instead, because they need *relative*
-symlinks and a repo rule cannot create one without shelling out to `ln`
-(`ctx.symlink` produces absolute links, which do not survive rules_foreign_cc
-copying the tree).
+symlinks: a repo rule cannot produce one (`ctx.symlink` writes absolute links,
+which point into the local Bazel cache and do not survive rules_foreign_cc
+copying the tree), while `ctx.actions.declare_symlink` can.
 
 See //third_party/xione_sysroot/README.md ("Configure scope") for how the
 manifest's package set was derived and validated.

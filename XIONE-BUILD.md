@@ -42,9 +42,19 @@ host. Also needs a host `pkg-config`.
 The **repository rules use no host tools at all** — only `ctx.download`,
 `ctx.extract`, `ctx.read` and `ctx.file`. Notably no binutils: Bazel unwraps the
 `.deb` containers itself, and ELF32 ARM objects are read with the cross `nm` from
-the Bootlin toolchain. Build *actions* still call the usual POSIX coreutils
-(`cp`, `ln`, `find`, `sed`, …), as does `rules_foreign_cc`'s generated script;
-that is the hermeticity ceiling while CMake drives the compile.
+the Bootlin toolchain. Nor do **our own build actions**: the sysroot's relative
+symlinks are `declare_symlink` artifacts staged with `cp -a`, so no `ar`, `nm` or
+`ln` is reachable from anything this repo writes — verified by building with all
+three shimmed to `exit 127`.
+
+Our actions do still call the usual POSIX coreutils (`cp`, `mkdir`, `find`,
+`sed`, …), as does `rules_foreign_cc`'s generated script — that is the
+hermeticity ceiling while CMake drives the compile. One item on that list is
+specifically irreducible: the generated script stages its tool binaries with
+`ln -sf`, and that symlink is load-bearing, because CMake finds `CMAKE_ROOT` by
+resolving `argv[0]` back to the real binary — a *copy* of `cmake` fails with
+`Could not find CMAKE_ROOT`. So dropping `ln` from `PATH` entirely needs CMake
+out of the picture, not a patch to `rules_foreign_cc`.
 
 ## What gets built
 

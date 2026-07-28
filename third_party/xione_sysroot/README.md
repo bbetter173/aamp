@@ -99,11 +99,15 @@ extra flags:
 
   Both of these live in `assemble_sysroot` (`//bazel/rules:xione_sysroot.bzl`),
   not in the `deb_sysroot` fetch, because a repository rule cannot create a
-  *relative* symlink without shelling out to `ln` (`ctx.symlink` produces absolute
-  links, which do not survive `rules_foreign_cc` copying the tree). Their order
-  inside that action is load-bearing: the include mirror runs against the deb tree
-  alone, before the glibc overlay, since it only links names that do not already
-  exist and glibc contributes colliding `usr/include` entries.
+  *relative* symlink at all (`ctx.symlink` produces absolute links, which point
+  into the local Bazel cache and do not survive `rules_foreign_cc` copying the
+  tree), whereas `ctx.actions.declare_symlink` can — the links are declared as
+  symlink artifacts and staged with `cp -a`, so no `ln` is involved.
+
+  Which names get mirrored is decided at analysis time from the deb filegroup,
+  which is what keeps the load-bearing ordering honest: the mirror must consider
+  the deb tree alone, since it only links names that tree lacks (`openssl` is the
+  live case) and the glibc overlay contributes colliding `usr/include` entries.
 - **`libpthreads.so` linker-script alias** — AAMP's `find_package(Threads)` emits
   the misspelled `-lpthreads`; aliased sysroot-side rather than patching the sources.
 - **icu** (`libicu-dev`/`libicu72`) — bookworm's libxml2 is ICU-enabled, so
