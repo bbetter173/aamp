@@ -19,7 +19,8 @@ headers and hand-frozen `wpe-webkit.syms` in //third_party/jsc.
 No host binutils required: Bazel's extractor unwraps the `.deb` ar container, and
 the symbol list is derived downstream by //third_party/jsc using the *cross* nm
 (the runtime `.so` is ELF32 ARM, which the host's nm cannot be relied on to read).
-`mkdir`/`cp` for the header staging are the only host tools left here.
+This rule uses **no host tools at all** — only `ctx.download`, `ctx.extract`,
+`ctx.read` and `ctx.file`.
 """
 
 _DATA_TARBALLS = ["data.tar.zst", "data.tar.xz", "data.tar.gz", "data.tar"]
@@ -74,15 +75,15 @@ def _jsc_deb_impl(ctx):
     _unwrap_deb(ctx, "sym.deb", "sym")
 
     # Headers -> include/JavaScriptCore/ (the include prefix //third_party/jsc uses).
+    # Copied through ctx.read/ctx.file rather than host `cp` so this rule needs no
+    # host tools; ctx.file creates the parent dirs. These are the 8 classic JSC C-API
+    # headers and are pure US-ASCII, so the round-trip is byte-exact.
     hdr_src = "hdr/usr/include/webkitgtk-4.1/JavaScriptCore"
-    ctx.execute(["mkdir", "-p", "include/JavaScriptCore"])
     for h in _HEADERS:
         src = ctx.path(hdr_src + "/" + h)
         if not src.exists:
             fail("jsc_deb: header {} not found under {}".format(h, hdr_src))
-        res = ctx.execute(["cp", str(src), "include/JavaScriptCore/" + h])
-        if res.return_code != 0:
-            fail("jsc_deb: copying {} failed: {}".format(h, res.stderr))
+        ctx.file("include/JavaScriptCore/" + h, ctx.read(src), executable = False)
 
     # The runtime .so is left in place and exposed as :runtime_so; the symbol list is
     # derived from it by //third_party/jsc using the *cross* nm, because reading an

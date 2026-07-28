@@ -93,9 +93,17 @@ extra flags:
   `<sysroot>/usr/lib` and `/lib`, not the `arm-linux-gnueabihf` multiarch subdir
   where the libs live. The multiarch `-L` is force-appended in the CMake
   toolchain file; `usr/include/arm-linux-gnueabihf/*` is mirrored into
-  `usr/include` so bare `#include <curl/curl.h>` resolves.
+  `usr/include` (relative symlinks) so bare `#include <curl/curl.h>` resolves.
 - **`libz.so` symlink** in `usr/lib` — CMake `FindZLIB` searches `<sysroot>/usr/lib`,
   not the multiarch subdir.
+
+  Both of these live in `assemble_sysroot` (`//bazel/rules:xione_sysroot.bzl`),
+  not in the `deb_sysroot` fetch, because a repository rule cannot create a
+  *relative* symlink without shelling out to `ln` (`ctx.symlink` produces absolute
+  links, which do not survive `rules_foreign_cc` copying the tree). Their order
+  inside that action is load-bearing: the include mirror runs against the deb tree
+  alone, before the glibc overlay, since it only links names that do not already
+  exist and glibc contributes colliding `usr/include` entries.
 - **`libpthreads.so` linker-script alias** — AAMP's `find_package(Threads)` emits
   the misspelled `-lpthreads`; aliased sysroot-side rather than patching the sources.
 - **icu** (`libicu-dev`/`libicu72`) — bookworm's libxml2 is ICU-enabled, so

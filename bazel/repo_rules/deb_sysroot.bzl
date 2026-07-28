@@ -9,9 +9,12 @@ Debian armhf packages, no device harvest, no proprietary binaries.
 A `.deb` is an `ar` archive whose `data.tar.{zst,xz,gz}` holds the filesystem
 payload, and Bazel's extractor understands both layers — so unwrapping needs no
 host binutils: one `ctx.extract` for the ar members, a second for the payload.
-The only remaining host requirement is `ln`, for the relative symlinks in the
-multiarch fixups (`ctx.symlink` produces absolute links, which do not survive
-rules_foreign_cc copying the tree).
+This rule uses **no host tools at all** — only `ctx.download`, `ctx.extract` and
+`ctx.file`. The multiarch fixups that bridge Debian's layout to the Bootlin gcc
+live in //bazel/rules:xione_sysroot.bzl instead, because they need *relative*
+symlinks and a repo rule cannot create one without shelling out to `ln`
+(`ctx.symlink` produces absolute links, which do not survive rules_foreign_cc
+copying the tree).
 
 See //third_party/xione_sysroot/README.md ("Configure scope") for how the
 manifest's package set was derived and validated.
@@ -46,9 +49,6 @@ GROUP ( /lib/libpthread.so.0 /lib/libc.so.6 )
 """
 
 def _deb_sysroot_impl(ctx):
-    if not ctx.which("ln"):
-        fail("deb_sysroot: 'ln' not found on PATH; it is required for the multiarch symlink fixups")
-
     debs = json.decode(ctx.read(ctx.attr.manifest))
     for d in debs:
         deb = "_debtmp/" + d["name"]
@@ -78,39 +78,7 @@ def _deb_sysroot_impl(ctx):
     # -lpthreads alias (see _LIBPTHREADS_SO).
     ctx.file("sysroot/usr/lib/arm-linux-gnueabihf/libpthreads.so", _LIBPTHREADS_SO)
 
-    _fixup_multiarch(ctx)
-
     ctx.template("BUILD.bazel", ctx.attr.build_file)
-
-def _ln_relative(ctx, target, link):
-    """Make a relative symlink `link` -> `target` (both repo paths).
-
-    Relative so it stays valid through rules_foreign_cc's copy of the sysroot tree.
-    """
-    ctx.execute(["ln", "-srfn", str(target), str(link)])
-
-def _fixup_multiarch(ctx):
-    """Bridge Debian's multiarch layout to the Bootlin gcc.
-
-    The Bootlin gcc (unlike a Debian-native gcc) searches only
-    <sysroot>/usr/{lib,include}, not the arm-linux-gnueabihf/ subdirs the debs use.
-
-    - Mirror every entry of usr/include/arm-linux-gnueabihf into usr/include so
-      `#include <curl/curl.h>` etc. resolve for builds that don't go through
-      pkg-config (notably libdash's own CMake).
-    - Expose usr/lib/arm-linux-gnueabihf/libz.so as usr/lib/libz.so, where
-      CMake's FindZLIB (PATH_SUFFIXES=lib) looks.
-    """
-    ma_inc = ctx.path("sysroot/usr/include/arm-linux-gnueabihf")
-    if ma_inc.exists:
-        for entry in ma_inc.readdir():
-            link = ctx.path("sysroot/usr/include/" + entry.basename)
-            if not link.exists:
-                _ln_relative(ctx, entry, link)
-
-    libz = ctx.path("sysroot/usr/lib/arm-linux-gnueabihf/libz.so")
-    if libz.exists:
-        _ln_relative(ctx, libz, ctx.path("sysroot/usr/lib/libz.so"))
 
 deb_sysroot = repository_rule(
     implementation = _deb_sysroot_impl,

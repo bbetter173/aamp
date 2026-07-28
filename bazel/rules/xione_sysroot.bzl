@@ -27,14 +27,52 @@ def _impl(ctx):
     cmds = [
         "set -euo pipefail",
         "mkdir -p {o}".format(o = out.path),
-        # deb-derived tree (headers + .pc + link .so's + fixup symlinks)
+        # deb-derived tree (headers + .pc + link .so's)
         "cp -a {r}/. {o}/".format(r = deb_root, o = out.path),
+    ]
+
+    # Multiarch fixups: bridge Debian's layout to the Bootlin gcc, which (unlike a
+    # Debian-native gcc) searches only <sysroot>/usr/{lib,include} and not the
+    # arm-linux-gnueabihf/ subdirs the .debs use.
+    #
+    #  - mirror every multiarch include entry into usr/include, so bare
+    #    `#include <curl/curl.h>` resolves for builds that don't go through
+    #    pkg-config (notably libdash's own CMake);
+    #  - expose libz.so at usr/lib/libz.so, where CMake's FindZLIB
+    #    (PATH_SUFFIXES=lib) looks.
+    #
+    # Relative links, so they stay valid through rules_foreign_cc's copy of this
+    # tree. Done here rather than in the deb_sysroot repo rule because a repo rule
+    # cannot create a *relative* symlink without shelling out to `ln`
+    # (`ctx.symlink` produces absolute links) — keeping it here leaves the whole
+    # fetch phase free of host tools.
+    #
+    # ORDER IS LOAD-BEARING: this must run against the deb tree ALONE, before the
+    # glibc overlay below. The mirror only links names that do not already exist,
+    # and the glibc overlay adds real usr/include entries (sys/, bits/, gnu/, …)
+    # that collide with multiarch ones. Running it after glibc would silently
+    # create fewer links; running it before, then overlaying glibc with `cp -an`
+    # (no-clobber), reproduces the behaviour these consumers were built against.
+    cmds.append(
+        "if [ -d {o}/usr/include/arm-linux-gnueabihf ]; then".format(o = out.path) +
+        " for e in {o}/usr/include/arm-linux-gnueabihf/*; do".format(o = out.path) +
+        " [ -e \"$e\" ] || continue; b=$(basename \"$e\");" +
+        " [ -e \"{o}/usr/include/$b\" ] ||".format(o = out.path) +
+        " ln -sfn \"arm-linux-gnueabihf/$b\" \"{o}/usr/include/$b\";".format(o = out.path) +
+        " done; fi",
+    )
+    cmds.append(
+        "if [ -e {o}/usr/lib/arm-linux-gnueabihf/libz.so ]; then".format(o = out.path) +
+        " ln -sfn arm-linux-gnueabihf/libz.so {o}/usr/lib/libz.so; fi".format(o = out.path),
+    )
+
+    cmds.extend([
         # Bootlin glibc: headers, CRT/static libs, and the shared libs + loader
         "mkdir -p {o}/usr/include {o}/usr/lib {o}/lib".format(o = out.path),
         "cp -an {g}/usr/include/. {o}/usr/include/".format(g = glibc_root, o = out.path),
         "cp -an {g}/usr/lib/. {o}/usr/lib/".format(g = glibc_root, o = out.path),
         "cp -an {g}/lib/. {o}/lib/".format(g = glibc_root, o = out.path),
-    ]
+    ])
 
     inputs = list(deb_files) + list(glibc_files)
 
