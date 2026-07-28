@@ -108,9 +108,8 @@ untouched — only `cmake/` gained the cross-toolchain file and `FindEthanLog.cm
 ## Gating
 
 `base_sysroot`/`aamp_sysroot` and the `deb_sysroot` fetch are
-`target_compatible_with = ["//bazel/constraints:xione-stb"]`. The fetch shells
-out to host `ar` to unwrap the debs; the guard makes a host `bazel build //...`
-skip these as incompatible, so the deb fetch (and its `ar` requirement) only
+`target_compatible_with = ["//bazel/constraints:xione-stb"]`, so a host
+`bazel build //...` skips them as incompatible and the 36-package deb fetch only
 happens under `--platforms=//bazel/platforms:xione`.
 
 ## Alternatives — `rules_distroless` (not adopted)
@@ -131,6 +130,8 @@ is built for OCI images, where the full closure is what you want; a cross-compil
 sysroot is the opposite — the toolchain owns libc/libstdc++, so the deb set must be
 a **curated, libc-excluded subset**, which is exactly what `deb_sysroot`'s
 hand-picked, non-transitive manifest encodes. Making distroless fit would mean
-re-deriving that leaf set by hand for no net maintenance win. The custom rule's one
-real cost — the host `ar` requirement — is a Linux-exec-only constraint the
-cross-build already has.
+re-deriving that leaf set by hand for no net maintenance win.
+
+The custom rule's one-time cost — a host `ar` — has since been removed: Bazel's own
+extractor unwraps the `.deb` container, so `deb_sysroot` needs no binutils at all.
+That removes the last argument distroless had here.

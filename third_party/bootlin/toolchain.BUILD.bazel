@@ -16,8 +16,8 @@
 # resolution for //bazel/platforms:xione; the `toolchain()` wrapper that
 # registers it lives in //third_party/bootlin so it can name local constraints.
 
-load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 load("@aamp//bazel/toolchain:gcc_toolchain.bzl", "gcc_toolchain_config")
+load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -34,6 +34,16 @@ filegroup(
 filegroup(
     name = "glibc",
     srcs = glob(["arm-buildroot-linux-gnueabihf/sysroot/**"]),
+)
+
+# The cross `nm`, for build actions that must read ELF32 ARM objects. The host's
+# binutils cannot be relied on for that: whether it works depends on how the distro
+# configured BFD's target list, and host `strip` already fails outright on these
+# files with "Unable to recognise the architecture of the input file". This is an
+# x86_64 host binary and runs standalone. Consumed by //third_party/jsc.
+filegroup(
+    name = "nm",
+    srcs = ["bin/arm-buildroot-linux-gnueabihf-nm"],
 )
 
 # Every file rules_cc may need to run the cross toolchain. The Bootlin tree is
@@ -75,6 +85,19 @@ gcc_toolchain_config(
     # Only applied to native cc_* built under //bazel/platforms:xione — AAMP
     # itself is compiled via its own CMake toolchain file.
     cxx_standard = "c++11",
+    # --sysroot for compile+link so plain cc_* built under //bazel/platforms:xione
+    # (e.g. //third_party/ethanlog, which needs libc) resolve the ARM libc from
+    # the Bootlin sysroot instead of falling back to the host's /lib.
+    #
+    # rules_foreign_cc builds (libdash, AAMP) also set CMAKE_SYSROOT to the
+    # assembled base/aamp sysroot via cmake/xione-armhf.cmake, so their links
+    # carry TWO --sysroot flags (base_sysroot then this one, which wins as the
+    # last). That is harmless because assemble_sysroot rewrites the merged glibc
+    # ld scripts to `=`-prefixed paths (`GROUP ( =/lib/libc.so.6 ... )`), which
+    # makes ld prepend whichever --sysroot is active — the ARM libc resolves the
+    # same under either root. Without that rewrite the absolute GROUP paths would
+    # escape to the host x86_64 libc; see //bazel/rules:xione_sysroot.bzl.
+    sysroot = "arm-buildroot-linux-gnueabihf/sysroot",
     target_compile_flags = [
         "-march=armv7-a",
         "-mfpu=neon-vfpv4",
@@ -89,19 +112,6 @@ gcc_toolchain_config(
     target_libc = "glibc_2.35",
     target_triple = "arm-buildroot-linux-gnueabihf",
     toolchain_identifier = "arm_buildroot_linux_gnueabihf_bootlin",
-    # --sysroot for compile+link so plain cc_* built under //bazel/platforms:xione
-    # (e.g. //third_party/ethanlog, which needs libc) resolve the ARM libc from
-    # the Bootlin sysroot instead of falling back to the host's /lib.
-    #
-    # rules_foreign_cc builds (libdash, AAMP) also set CMAKE_SYSROOT to the
-    # assembled base/aamp sysroot via cmake/xione-armhf.cmake, so their links
-    # carry TWO --sysroot flags (base_sysroot then this one, which wins as the
-    # last). That is harmless because assemble_sysroot rewrites the merged glibc
-    # ld scripts to `=`-prefixed paths (`GROUP ( =/lib/libc.so.6 ... )`), which
-    # makes ld prepend whichever --sysroot is active — the ARM libc resolves the
-    # same under either root. Without that rewrite the absolute GROUP paths would
-    # escape to the host x86_64 libc; see //bazel/rules:xione_sysroot.bzl.
-    sysroot = "arm-buildroot-linux-gnueabihf/sysroot",
 )
 
 cc_toolchain(

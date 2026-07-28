@@ -22,14 +22,44 @@ package(default_visibility = ["//visibility:public"])
 filegroup(
     name = "jsc_header_files",
     srcs = ["@jsc_deb//:headers"],
-    # Cross-only: gating this keeps the @jsc_deb fetch (which needs host `ar`/`nm`)
-    # out of a host `bazel build //...`. Bazel skips incompatible targets in
-    # wildcards, so the fetch only runs under //bazel/platforms:xione. Matches the
-    # cc_binary stub below and //third_party/xione_sysroot.
+    # Cross-only: gating this keeps the @jsc_deb fetch out of a host
+    # `bazel build //...`. Bazel skips incompatible targets in wildcards, so the
+    # fetch only runs under //bazel/platforms:xione. Matches the cc_binary stub
+    # below and //third_party/xione_sysroot.
     target_compatible_with = [
         "@platforms//cpu:armv7",
         "@platforms//os:linux",
     ],
+)
+
+# The classic JS*/kJS* C-API exports of the real WebKitGTK runtime .so.
+#
+# Derived here in a build action rather than at fetch time so it can use the CROSS
+# nm from the Bootlin toolchain. The .so is ELF32 ARM, and whether the host's nm can
+# read it depends on how the distro configured BFD's target list — host `strip`
+# already fails outright on these files. Doing it at fetch time made the *fetch*
+# host-dependent, which is a confusing place to break.
+#
+# `LC_ALL=C sort -u` to match Starlark's codepoint ordering, so the output is
+# byte-identical to the previous fetch-time implementation.
+genrule(
+    name = "wpe_webkit_syms",
+    srcs = ["@jsc_deb//:runtime_so"],
+    outs = ["wpe-webkit.syms"],
+    cmd = (
+        "$(execpath @xione_bootlin_toolchain//:nm) -D --defined-only $(SRCS) " +
+        "| awk '{ n = $$NF } n ~ /^k?JS/ { print n }' " +
+        "| LC_ALL=C sort -u > $@; " +
+        # A silently empty list would produce a stub exporting nothing, which links
+        # fine and then fails on the device. Fail the build instead.
+        "[ -s $@ ] || { echo 'no JS*/kJS* symbols extracted from $(SRCS)' >&2; exit 1; }"
+    ),
+    # Cross-only (see :jsc_header_files): keeps the @jsc_deb fetch out of host wildcards.
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+    ],
+    tools = ["@xione_bootlin_toolchain//:nm"],
 )
 
 # Emit a trivial C definition per exported symbol: `k`-prefixed names (JSC
@@ -39,7 +69,7 @@ filegroup(
 # (-nostdlib), sidestepping the target sysroot entirely.
 genrule(
     name = "wpe_webkit_stub_src",
-    srcs = ["@jsc_deb//:wpe-webkit.syms"],
+    srcs = [":wpe_webkit_syms"],
     outs = ["wpe_webkit_stub.c"],
     cmd = (
         "{ echo '/* Generated from wpe-webkit.syms by //third_party/jsc. Do not edit. */'; " +

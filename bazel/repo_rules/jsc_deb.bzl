@@ -16,7 +16,10 @@ device's WPE still supplies the same frozen C API at runtime; this only sources
 the *build*-time headers + link-stub symbol set. Replaces the hand-copied
 headers and hand-frozen `wpe-webkit.syms` in //third_party/jsc.
 
-Host `ar` + `nm` (binutils) are the only host requirements, same as deb_sysroot.
+No host binutils required: Bazel's extractor unwraps the `.deb` ar container, and
+the symbol list is derived downstream by //third_party/jsc using the *cross* nm
+(the runtime `.so` is ELF32 ARM, which the host's nm cannot be relied on to read).
+`mkdir`/`cp` for the header staging are the only host tools left here.
 """
 
 _DATA_TARBALLS = ["data.tar.zst", "data.tar.xz", "data.tar.gz", "data.tar"]
@@ -42,15 +45,22 @@ filegroup(
     srcs = glob(["include/JavaScriptCore/*.h"]),
 )
 
-exports_files(["wpe-webkit.syms"])
+# The real WebKitGTK runtime .so, left where the deb put it. //third_party/jsc runs
+# the cross nm over this to derive the exported-symbol list for its link stub.
+filegroup(
+    name = "runtime_so",
+    srcs = glob(["sym/usr/lib/arm-linux-gnueabihf/libjavascriptcoregtk-4.1.so.0.*"]),
+)
 """
 
-def _unwrap_deb(ctx, ar, deb, outdir):
-    """`ar x` a .deb (from repo root) into outdir and extract its data.tar.*."""
-    ctx.execute(["mkdir", "-p", outdir])
-    res = ctx.execute([ar, "x", "../" + deb], working_directory = outdir)
-    if res.return_code != 0:
-        fail("jsc_deb: `ar x {}` failed: {}".format(deb, res.stderr))
+def _unwrap_deb(ctx, deb, outdir):
+    """Unwrap a .deb into outdir and extract its data.tar.*.
+
+    No host binutils involved: Bazel's own extractor understands the `ar` container
+    a .deb is, so one extract yields debian-binary/control.tar.*/data.tar.* and a
+    second unpacks the payload.
+    """
+    ctx.extract(archive = deb, output = outdir)
     for name in _DATA_TARBALLS:
         if ctx.path(outdir + "/" + name).exists:
             ctx.extract(archive = outdir + "/" + name, output = outdir)
@@ -58,15 +68,10 @@ def _unwrap_deb(ctx, ar, deb, outdir):
     fail("jsc_deb: no data.tar.* found in {}".format(deb))
 
 def _jsc_deb_impl(ctx):
-    ar = ctx.which("ar")
-    nm = ctx.which("nm")
-    if not ar or not nm:
-        fail("jsc_deb requires host `ar` and `nm` (binutils) on PATH")
-
     ctx.download(url = ctx.attr.headers_url, sha256 = ctx.attr.headers_sha256, output = "hdr.deb")
     ctx.download(url = ctx.attr.symbols_url, sha256 = ctx.attr.symbols_sha256, output = "sym.deb")
-    _unwrap_deb(ctx, ar, "hdr.deb", "hdr")
-    _unwrap_deb(ctx, ar, "sym.deb", "sym")
+    _unwrap_deb(ctx, "hdr.deb", "hdr")
+    _unwrap_deb(ctx, "sym.deb", "sym")
 
     # Headers -> include/JavaScriptCore/ (the include prefix //third_party/jsc uses).
     hdr_src = "hdr/usr/include/webkitgtk-4.1/JavaScriptCore"
@@ -79,32 +84,14 @@ def _jsc_deb_impl(ctx):
         if res.return_code != 0:
             fail("jsc_deb: copying {} failed: {}".format(h, res.stderr))
 
-    # Symbols -> wpe-webkit.syms: the classic JS*/kJS* C-API exports of the real
-    # runtime .so (nm -D). A superset of what the stub needs — extra exports are
-    # harmless for a link stub.
+    # The runtime .so is left in place and exposed as :runtime_so; the symbol list is
+    # derived from it by //third_party/jsc using the *cross* nm, because reading an
+    # ELF32 ARM object with the host's nm is not something we can rely on (see the
+    # :nm filegroup in //third_party/bootlin:toolchain.BUILD.bazel). Fail here rather
+    # than let a glob silently match nothing downstream.
     libdir = ctx.path("sym/usr/lib/arm-linux-gnueabihf")
-    so = None
-    for entry in libdir.readdir():
-        if entry.basename.startswith("libjavascriptcoregtk-4.1.so.0."):
-            so = entry
-            break
-    if not so:
+    if not [e for e in libdir.readdir() if e.basename.startswith("libjavascriptcoregtk-4.1.so.0.")]:
         fail("jsc_deb: libjavascriptcoregtk-4.1 runtime .so not found in the symbols deb")
-    res = ctx.execute([nm, "-D", "--defined-only", str(so)])
-    if res.return_code != 0:
-        fail("jsc_deb: `nm -D` failed: {}".format(res.stderr))
-    syms = {}
-    for line in res.stdout.splitlines():
-        # nm format is "ADDR TYPE NAME"; Starlark split() needs an explicit sep,
-        # so split on space and drop the empties from the padded address column.
-        fields = [t for t in line.replace("\t", " ").split(" ") if t]
-        if len(fields) >= 3:
-            name = fields[-1]
-            if name.startswith("JS") or name.startswith("kJS"):
-                syms[name] = True
-    if not syms:
-        fail("jsc_deb: no JS*/kJS* symbols extracted from {}".format(so.basename))
-    ctx.file("wpe-webkit.syms", "\n".join(sorted(syms)) + "\n")
 
     ctx.file("BUILD.bazel", _BUILD)
 

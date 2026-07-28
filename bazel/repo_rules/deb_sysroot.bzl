@@ -7,9 +7,11 @@ no-harvest XiOne sysroot: headers + `.pc` + link-stand-in `.so`s straight from
 Debian armhf packages, no device harvest, no proprietary binaries.
 
 A `.deb` is an `ar` archive whose `data.tar.{zst,xz,gz}` holds the filesystem
-payload; Bazel can extract the inner tarball but not the `ar` wrapper, so the
-rule shells out to host `ar` (binutils) to unwrap it. `ar`, plus a Bazel new
-enough to extract `.tar.zst`, are the only host requirements.
+payload, and Bazel's extractor understands both layers — so unwrapping needs no
+host binutils: one `ctx.extract` for the ar members, a second for the payload.
+The only remaining host requirement is `ln`, for the relative symlinks in the
+multiarch fixups (`ctx.symlink` produces absolute links, which do not survive
+rules_foreign_cc copying the tree).
 
 See //third_party/xione_sysroot/README.md ("Configure scope") for how the
 manifest's package set was derived and validated.
@@ -44,9 +46,6 @@ GROUP ( /lib/libpthread.so.0 /lib/libc.so.6 )
 """
 
 def _deb_sysroot_impl(ctx):
-    ar = ctx.which("ar")
-    if not ar:
-        fail("deb_sysroot: 'ar' (binutils) not found on PATH; it is required to unwrap .deb archives")
     if not ctx.which("ln"):
         fail("deb_sysroot: 'ln' not found on PATH; it is required for the multiarch symlink fixups")
 
@@ -54,9 +53,11 @@ def _deb_sysroot_impl(ctx):
     for d in debs:
         deb = "_debtmp/" + d["name"]
         ctx.download(url = d["url"], output = deb, sha256 = d["sha256"])
-        res = ctx.execute([ar, "x", d["name"]], working_directory = "_debtmp")
-        if res.return_code != 0:
-            fail("deb_sysroot: `ar x {}` failed: {}".format(d["name"], res.stderr))
+
+        # Bazel's own extractor understands the `ar` container a .deb is, so
+        # unwrapping needs no host binutils: this yields debian-binary,
+        # control.tar.* and data.tar.* alongside the .deb.
+        ctx.extract(archive = deb, output = "_debtmp")
         data = None
         for name in _DATA_TARBALLS:
             if ctx.path("_debtmp/" + name).exists:

@@ -37,7 +37,10 @@ runs by accident and `//...` stays green with no `manual` tag needed.
 
 Linux x86_64. The Bootlin cross-compiler ships x86_64 host binaries only, so
 `exec_compatible_with` pins linux + x86_64 — an arm64 Mac cannot be the exec
-host. Also needs `ar` (binutils) for `.deb` unpacking and a host `pkg-config`.
+host. Also needs a host `pkg-config`, and `ln` for the sysroot's multiarch
+symlinks. Notably it does **not** need host binutils: Bazel unwraps the `.deb`
+containers itself, and ELF32 ARM objects are read with the cross `nm` from the
+Bootlin toolchain.
 
 ## What gets built
 
