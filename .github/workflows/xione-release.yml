@@ -40,7 +40,8 @@ permissions:
 jobs:
   release:
     name: Build and publish
-    runs-on: gke-arc-aamp
+    # GitHub-hosted; see the note in xione-ci.yml on `gke-arc-aamp`.
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4

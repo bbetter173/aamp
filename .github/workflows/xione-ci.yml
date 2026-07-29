@@ -49,7 +49,14 @@ jobs:
     name: Build and verify (armv7 XiOne)
     # Linux x86_64 only: the Bootlin cross-compiler ships x86_64 host binaries,
     # so exec_compatible_with pins linux+x86_64 and an arm runner cannot build.
-    runs-on: gke-arc-aamp
+    #
+    # GitHub-hosted, not the `gke-arc-aamp` self-hosted set. That label was tried
+    # and is NOT served for this repo: jobs sat queued 8+ minutes with no runner
+    # assigned, the same way rdk-packages hung before its runners existed
+    # (rillanetwork/core-infra#133 provisions the scale set for rdk-packages, not
+    # for this repo). Switching is a one-line change once a listener exists — the
+    # apt step below already tolerates either image.
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
