@@ -53,14 +53,26 @@ command -v "$PATCHELF" >/dev/null 2>&1 || {
 # Stripping needs the *cross* strip. The host's binutils cannot read ELF32 ARM
 # ("Unable to recognise the architecture of the input file"), so use the one from
 # the Bootlin toolchain Bazel already fetched rather than whatever is on PATH.
+# The external directory is matched by suffix rather than spelled out: the leading
+# `+<rule>+` is Bazel's internal canonical-repo form, so it changes whenever the
+# fetch mechanism does (it was `+http_archive+` until the toolchain moved to a repo
+# rule, and `~http_archive~` before that). Hardcoding it broke this silently: the
+# stale path kept resolving on any runner whose Bazel cache still held the old
+# directory, so CI stayed green and only a clean build would have failed.
 resolve_cross_strip() {
     if [ -n "${STRIP:-}" ]; then
         echo "$STRIP"
         return
     fi
-    local ob
+    local ob d
     ob="$("$BAZEL" info output_base 2>/dev/null)" || return 1
-    echo "${ob}/external/+http_archive+xione_bootlin_toolchain/bin/arm-buildroot-linux-gnueabihf-strip"
+    for d in "$ob"/external/*xione_bootlin_toolchain; do
+        if [ -d "$d" ]; then
+            echo "${d}/bin/arm-buildroot-linux-gnueabihf-strip"
+            return
+        fi
+    done
+    return 1
 }
 
 # The nine libraries //:aamp emits. Keep in sync with out_shared_libs in
