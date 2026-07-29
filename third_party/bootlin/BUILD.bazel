@@ -9,9 +9,21 @@
 package(default_visibility = ["//visibility:public"])
 
 # Convenience alias to the whole fetched toolchain tree.
+#
+# `manual` matters here, and not for the usual reason. Both targets in this
+# package name a label inside @xione_bootlin_toolchain, and analysing either one
+# forces that archive to be fetched — a ~500 MB Linux-x86_64 download plus its
+# patch_cmds — on *any* `bazel build //...`, on any host, even though every cross
+# target is skipped as incompatible. On a macOS host that is pure waste (nothing
+# there can use it) and it is the only reason a wildcard build touches the fetch
+# phase's shell at all. Keeping both out of wildcard expansion makes the cross
+# build genuinely opt-in: `bazel build //:aamp --platforms=//bazel/platforms:xione`
+# still fetches it, and `register_toolchains` resolves this label directly, which
+# `manual` does not affect.
 alias(
     name = "toolchain",
     actual = "@xione_bootlin_toolchain//:all",
+    tags = ["manual"],
 )
 
 # Registers the Bootlin cc_toolchain (defined in the fetched repo, next to its
@@ -30,6 +42,10 @@ toolchain(
         "@platforms//os:linux",
         "@platforms//cpu:x86_64",
     ],
+    # See the alias above: `manual` keeps `bazel build //...` from fetching the
+    # toolchain archive just to analyse this target. Registration is by label and
+    # is unaffected.
+    tags = ["manual"],
     target_compatible_with = [
         "@platforms//cpu:armv7",
         "@platforms//os:linux",
