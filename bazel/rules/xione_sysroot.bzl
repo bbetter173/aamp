@@ -10,12 +10,19 @@ target consumes via `data`, with XIONE_SYSROOT pointing at its staged path.
 
 _MULTIARCH = "arm-linux-gnueabihf"
 
-def _root_of(files, marker):
-    """The directory path up to and including `marker`, from the first file."""
+def _root_of(files, marker, what):
+    """The directory path up to and including `marker`, from the first file.
+
+    `what` names the source in the error message: an empty filegroup — an upstream
+    layout change moving what a glob matches, say — would otherwise fail with a
+    bare Starlark "index out of range" that names nothing.
+    """
+    if not files:
+        fail("assemble_sysroot: {} resolved to no files (expected a tree containing {})".format(what, marker))
     p = files[0].path
     idx = p.find(marker)
     if idx == -1:
-        fail("assemble_sysroot: marker {} not found in {}".format(marker, p))
+        fail("assemble_sysroot: marker {} not found in {} (from {})".format(marker, p, what))
     return p[:idx + len(marker)]
 
 def _entries_under(files, prefix):
@@ -61,8 +68,8 @@ def _impl(ctx):
 
     deb_files = ctx.files.deb_sysroot
     glibc_files = ctx.files.glibc
-    deb_root = _root_of(deb_files, "/sysroot")
-    glibc_root = _root_of(glibc_files, "/arm-buildroot-linux-gnueabihf/sysroot")
+    deb_root = _root_of(deb_files, "/sysroot", str(ctx.attr.deb_sysroot.label))
+    glibc_root = _root_of(glibc_files, "/arm-buildroot-linux-gnueabihf/sysroot", str(ctx.attr.glibc.label))
 
     cmds = [
         "set -euo pipefail",
@@ -123,13 +130,27 @@ def _impl(ctx):
 
     # Individual overlay files placed at explicit destinations. A target may
     # expose several files (e.g. a rules_foreign_cc cmake() emits both an include
-    # dir and lib/<name>.so); pick the one whose basename matches the
-    # destination, falling back to the sole/first file.
+    # dir and lib/<name>.so), so the one whose basename matches the destination is
+    # the one staged — and it must be exactly one.
+    #
+    # There is deliberately no fallback to "the first file". A soname bump or a
+    # cmake() layout change makes the basename stop matching, and taking an
+    # arbitrary sibling then stages e.g. an include *directory* at
+    # usr/lib/…/libdash.so, which surfaces much later as AAMP's link failing with
+    # "file format not recognized". Name the mismatch here instead.
     for target, dest in ctx.attr.overlay_files.items():
         tfiles = target.files.to_list()
         want = dest.rsplit("/", 1)[-1]
         matches = [f for f in tfiles if f.basename == want]
-        f = matches[0] if matches else tfiles[0]
+        if len(matches) != 1:
+            fail("assemble_sysroot: overlay_files[{}] -> {}: expected exactly one file named {}, found {} among {}".format(
+                target.label,
+                dest,
+                want,
+                len(matches),
+                [f.basename for f in tfiles],
+            ))
+        f = matches[0]
         cmds.append("mkdir -p $(dirname {o}/{d})".format(o = out.path, d = dest))
         cmds.append("cp -a {src} {o}/{d}".format(src = f.path, o = out.path, d = dest))
         inputs.append(f)
@@ -143,7 +164,7 @@ def _impl(ctx):
     for target, dest in ctx.attr.overlay_trees.items():
         tfiles = target.files.to_list()
         marker = marker_by_label.get(target.label, ctx.attr.overlay_tree_marker)
-        troot = _root_of(tfiles, "/" + marker)
+        troot = _root_of(tfiles, "/" + marker, "overlay_trees[{}]".format(target.label))
         cmds.append("mkdir -p {o}/{d}".format(o = out.path, d = dest))
         cmds.append("cp -a {r}/. {o}/{d}/".format(r = troot, o = out.path, d = dest))
         inputs.extend(tfiles)
