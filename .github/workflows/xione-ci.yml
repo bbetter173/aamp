@@ -74,61 +74,71 @@ jobs:
           $SUDO apt-get update
           $SUDO apt-get install -y --no-install-recommends binutils pkg-config patchelf
 
-      - name: Cache Bazel
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/bazel
-          # The expensive, rarely-changing inputs are the Bootlin toolchain and
-          # the 36 pinned .debs, so key on what pins them.
-          key: bazel-xione-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
-          restore-keys: |
-            bazel-xione-
-
-      - name: Build
-        run: bazelisk build //:aamp --platforms=//bazel/platforms:xione
-
-      - name: Verify artifacts
-        # These are the real regression tests. The failure mode that matters here
-        # is not "does it compile" but "did it silently build for the wrong
-        # architecture, or lose a library the device needs".
+      - name: Configure Bazel caches
+        # Caching ~/.cache/bazel wholesale also captured the *output_base*, which is
+        # how a stale `external/` tree survived between runs: it kept a renamed
+        # repository directory alive long enough for CI to pass on a commit that a
+        # clean build fails (see tools/release/stage_artifacts.sh's strip
+        # resolution). Split the two instead, in a user bazelrc so every invocation
+        # picks it up — including the nested ones inside stage_artifacts.sh:
+        #
+        #   repository cache — content-addressed downloads. Safe to share, and it is
+        #     the genuinely slow part (36 debs off snapshot.debian.org, ~500 MB
+        #     toolchain).
+        #   disk cache — action outputs, keyed on action hashes, so Bazel decides
+        #     what is reusable rather than a key I wrote by hand.
+        #
+        # The output_base is never restored, so every run analyses from scratch.
         run: |
-          set -euo pipefail
-          LIBDIR="$(bazelisk info bazel-bin)/aamp/lib"
-          EXPECTED=9
-          count=0
+          mkdir -p "$HOME/bazel-cache/repos" "$HOME/bazel-cache/disk"
+          printf 'common --repository_cache=%s/bazel-cache/repos\ncommon --disk_cache=%s/bazel-cache/disk\n' \
+            "$HOME" "$HOME" > "$HOME/.bazelrc"
 
-          for so in "$LIBDIR"/*.so; do
-            name="$(basename "$so")"
-            hdr="$(readelf -h "$so")"
-            grep -q 'Class: *ELF32' <<<"$hdr" || { echo "::error::$name is not ELF32"; exit 1; }
-            grep -q 'Machine: *ARM' <<<"$hdr" || { echo "::error::$name is not EM_ARM"; exit 1; }
-            grep -q 'hard-float' <<<"$hdr"    || { echo "::error::$name is not hard-float ABI"; exit 1; }
-            count=$((count + 1))
-            echo "ok: $name"
-          done
+      - name: Restore repository cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/bazel-cache/repos
+          # Keyed on what pins the downloads, which is exactly what this cache holds.
+          key: bazel-repos-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
+          restore-keys: |
+            bazel-repos-
 
-          # A dropped middleware library still links but cannot load on device,
-          # so assert the count rather than trusting the build to notice.
-          [ "$count" -eq "$EXPECTED" ] || {
-            echo "::error::expected $EXPECTED shared libraries, found $count"
-            exit 1
-          }
+      - name: Restore disk cache
+        id: disk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/bazel-cache/disk
+          key: bazel-disk-${{ github.sha }}
+          restore-keys: |
+            bazel-disk-
 
-          # Every AAMP-internal DT_NEEDED must be satisfied by a sibling.
-          for so in "$LIBDIR"/*.so; do
-            readelf -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | while read -r need; do
-              case "$need" in
-                libaamp*.so|libplayer*.so|libmetrics.so|libbaseconversion.so|libsubtec.so)
-                  [ -f "$LIBDIR/$need" ] || {
-                    echo "::error::$(basename "$so") needs $need, which was not built"
-                    exit 1
-                  } ;;
-              esac
-            done
-          done
-          echo "internal DT_NEEDED closure is self-contained"
+      - name: Build and verify artifacts
+        # //tools/verify:xione_libs_ok asserts every library is ELF32 ARM hard-float,
+        # that all nine are present, and that the AAMP-internal DT_NEEDED closure is
+        # self-contained. It lives in Bazel rather than here so it is cached, only
+        # re-runs when the libraries change, and can be run locally with the same
+        # command. Building it builds //:aamp.
+        run: |
+          bazelisk build //:aamp //tools/verify:xione_libs_ok \
+            --platforms=//bazel/platforms:xione
 
       - name: Verify release staging
         # Exercise the staging path on every run, so an RPATH or packaging
         # regression surfaces here and not at release time.
         run: bash tools/release/stage_artifacts.sh --version ci-${{ github.sha }}
+
+      - name: Save repository cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/bazel-cache/repos
+          key: bazel-repos-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
+
+      - name: Save disk cache
+        # Pushes write, pull requests only read: PR runs would otherwise each add an
+        # entry and evict the shared one they benefit from.
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/bazel-cache/disk
+          key: bazel-disk-${{ github.sha }}
