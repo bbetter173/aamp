@@ -175,22 +175,13 @@ def _impl(ctx):
     for dest, target in ctx.attr.symlinks.items():
         _stage_link(ctx, cmds, inputs, out, dest, target, replace = True)
 
-    # Make the glibc/deb GNU ld scripts relocatable. ld only auto-prepends the
-    # active --sysroot to a linker script's absolute GROUP/INPUT paths when the
-    # sysroot equals the toolchain's *built-in* default; a relocated sysroot
-    # (this merged tree) leaves `GROUP ( /lib/libc.so.6 ... )` pointing at the
-    # host, so every cross link escapes to the host x86_64 libc ("file format
-    # not recognized"). Prefixing each absolute path with `=` forces ld to
-    # prepend whatever --sysroot is in effect regardless of its default. Covers
-    # the Bootlin libc.so and the deb libpthreads.so alias; the sed is scoped to
-    # GROUP/INPUT/AS_NEEDED lines and is idempotent. The scripts arrive as
-    # symlinks into read-only repos, so rewrite through a temp file and replace.
-    cmds.append(
-        "find {o}/lib {o}/usr/lib \\( -type f -o -type l \\) | while read -r f; do".format(o = out.path) +
-        " if grep -qI 'GNU ld script' \"$f\" 2>/dev/null; then" +
-        " sed -E '/GROUP|INPUT|AS_NEEDED/ s#([ (])/#\\1=/#g' \"$f\" > \"$f.relocfix\";" +
-        " rm -f \"$f\"; mv \"$f.relocfix\" \"$f\"; fi; done",
-    )
+    # No ld-script rewrite here. Both sources make their GNU ld scripts
+    # sysroot-relative at fetch time (//bazel/repo_rules:ld_scripts.bzl, used by
+    # bootlin_toolchain and deb_sysroot), so the merged tree inherits `=`-prefixed
+    # GROUP paths and this action does not need to re-derive them. Doing it once at
+    # fetch also means a .deb that ships its own ld script is covered, and this
+    # action keeps one less shell dependency — it was the `sed` here and in
+    # patch_cmds that made the build GNU-coreutils-specific.
 
     ctx.actions.run_shell(
         outputs = [out],
