@@ -40,7 +40,7 @@ permissions:
 jobs:
   release:
     name: Build and publish
-    runs-on: ubuntu-latest
+    runs-on: gke-arc-aamp
 
     steps:
       - uses: actions/checkout@v4
@@ -50,8 +50,12 @@ jobs:
 
       - name: Install host build requirements
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends binutils pkg-config patchelf
+          # The ARC runner image runs as root without sudo; GitHub-hosted needs
+          # sudo. Pick whichever exists so the workflow runs on either.
+          SUDO=""
+          command -v sudo >/dev/null 2>&1 && SUDO=sudo
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends binutils pkg-config patchelf
 
       - name: Cache Bazel
         uses: actions/cache@v4
