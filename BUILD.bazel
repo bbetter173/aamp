@@ -167,7 +167,13 @@ cmake(
         "libplayerlogmanager.so",
         "libsubtec.so",
     ],
-    postfix_script = "mkdir -p $$INSTALLDIR/lib && for so in libaamp.so libaampjsbindings.so libbaseconversion.so libmetrics.so libplayerfbinterface.so libplayergstinterface.so libplayerjsonobject.so libplayerlogmanager.so libsubtec.so; do cp \"$$(find $$BUILD_TMPDIR -name $$so -type f | head -1)\" $$INSTALLDIR/lib/; done",
+    # Collect the nine built libraries out of the CMake build tree. Each name must
+    # resolve to exactly one file: `| head -1` would silently pick a
+    # filesystem-order-dependent match if AAMP's CMake ever copied a library
+    # around, making the staged bytes differ between machines for one source
+    # revision, and would pass an empty path to cp on no match ("missing
+    # destination file operand"). Fail with the name and the candidates instead.
+    postfix_script = "mkdir -p $$INSTALLDIR/lib && for so in libaamp.so libaampjsbindings.so libbaseconversion.so libmetrics.so libplayerfbinterface.so libplayergstinterface.so libplayerjsonobject.so libplayerlogmanager.so libsubtec.so; do set -- $$(find $$BUILD_TMPDIR -name $$so -type f); if [ $$# -ne 1 ]; then echo \"postfix_script: expected exactly one $$so in the build tree, found $$#: $$*\" >&2; exit 1; fi; cp \"$$1\" $$INSTALLDIR/lib/; done",
     # Heavy build; caches as one action unit — expect a full rebuild on any
     # source change.
     target_compatible_with = ["//bazel/constraints:xione-stb"],
