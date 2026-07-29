@@ -46,6 +46,13 @@ filegroup(
     srcs = ["bin/arm-buildroot-linux-gnueabihf-nm"],
 )
 
+# The cross `readelf`, for the same reason as `:nm` — consumed by the artifact
+# assertions in //tools/verify.
+filegroup(
+    name = "readelf",
+    srcs = ["bin/arm-buildroot-linux-gnueabihf-readelf"],
+)
+
 # Every file rules_cc may need to run the cross toolchain. The Bootlin tree is
 # self-contained (gcc, binutils, the target sysroot, gcc's own libexec), so one
 # glob feeds all the cc_toolchain file-group slots.
