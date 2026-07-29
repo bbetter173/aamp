@@ -54,8 +54,16 @@ cmake(
         # Point at the staged data deps by execroot path, the pattern proven by
         # //third_party/libdash. XIONE_SYSROOT is the merged aamp_sysroot tree
         # (deb tree + glibc + ethanlog + jsc + libdash).
-        # buildifier: disable=external-path
-        "XIONE_TOOLCHAIN_DIR": "$$EXT_BUILD_ROOT/external/+http_archive+xione_bootlin_toolchain",
+        #
+        # XIONE_TOOLCHAIN_DIR is derived from a file inside the toolchain rather
+        # than spelled out: the literal `external/+http_archive+<name>` is Bazel's
+        # internal canonical-repo-name form, which has already changed once
+        # (`~http_archive~name`). Hardcoding it means a Bazel upgrade, or moving
+        # the archive behind a module extension, silently points this at a
+        # nonexistent directory and CMake fails with "CMAKE_C_COMPILER not found"
+        # rather than anything pointing here. `:nm` is a single-file filegroup at
+        # bin/<triple>-nm, so two dirnames give the toolchain root.
+        "XIONE_TOOLCHAIN_DIR": "$$EXT_BUILD_ROOT/$$(dirname $$(dirname $(execpath @xione_bootlin_toolchain//:nm)))",
         "XIONE_SYSROOT": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)",
         "CMAKE_MACOSX_RPATH": "FALSE",
         # Pre-seed the JSC C-API header dir. CMakeLists.txt locates it with
@@ -112,6 +120,9 @@ cmake(
         "//:cmake/xione-armhf.cmake",
         "//third_party/xione_sysroot:aamp_sysroot",
         "@xione_bootlin_toolchain//:all",
+        # Anchor for the XIONE_TOOLCHAIN_DIR $(execpath) above; already part of
+        # :all, listed so location expansion can resolve it.
+        "@xione_bootlin_toolchain//:nm",
     ],
     env = {
         # pkg-config must resolve the sysroot's .pc files, not the host's —
