@@ -73,10 +73,17 @@ http_archive(
     # forces ld to prepend whatever --sysroot is active. Idempotent; scoped to
     # GROUP/INPUT/AS_NEEDED lines. assemble_sysroot applies the same rewrite to
     # the merged AAMP sysroot (see //bazel/rules:xione_sysroot.bzl).
+    #
+    # Rewrite through a temp file rather than with `sed -i -E`: `-i` without an
+    # argument is GNU-only (BSD/macOS sed reads the next argument as the backup
+    # suffix, so `-E` becomes the suffix and the expression becomes a filename).
+    # Fetches always run on the local host, even under --config=rbe, so a macOS
+    # client would fail here. Same form assemble_sysroot uses.
     patch_cmds = [
         "find arm-buildroot-linux-gnueabihf/sysroot -type f | while read -r f; do" +
         " if grep -qI 'GNU ld script' \"$f\" 2>/dev/null; then" +
-        " sed -i -E '/GROUP|INPUT|AS_NEEDED/ s#([ (])/#\\1=/#g' \"$f\"; fi; done",
+        " sed -E '/GROUP|INPUT|AS_NEEDED/ s#([ (])/#\\1=/#g' \"$f\" > \"$f.relocfix\";" +
+        " rm -f \"$f\"; mv \"$f.relocfix\" \"$f\"; fi; done",
     ],
     sha256 = "64329b3e72350ceda65997368395a945ef83769013d82414dc5f2021c33f2d44",
     strip_prefix = "armv7-eabihf--glibc--stable-2022.08-1",
