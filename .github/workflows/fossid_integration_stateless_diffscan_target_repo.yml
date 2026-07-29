@@ -4,6 +4,18 @@ on: pull_request
 
 jobs:
   call-fossid-workflow:
+    # Upstream-only. This calls an rdkcentral reusable workflow that needs the
+    # FOSSID container/host credentials, which exist as secrets on
+    # rdkcentral/aamp and cannot be had on a fork. Without them the four secrets
+    # below resolve to empty strings, the called workflow fails template
+    # validation ("Unexpected value ''") before any step runs, and every PR on
+    # this fork carries a red check that no change to the PR can fix.
+    #
+    # Guarding on the repository keeps the file and its trigger identical to
+    # upstream — the job skips here and still runs there — so this stays a
+    # one-line fork delta rather than a deletion to re-resolve on every merge
+    # from upstream. Drop this `if` if the credentials ever reach the fork.
+    if: github.repository == 'rdkcentral/aamp'
     uses: rdkcentral/build_tools_workflows/.github/workflows/fossid_integration_stateless_diffscan.yml@develop
     secrets: 
         FOSSID_CONTAINER_USERNAME: ${{ secrets.FOSSID_CONTAINER_USERNAME }}
