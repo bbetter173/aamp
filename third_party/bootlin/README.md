@@ -46,7 +46,10 @@ Making it work for an external-repo toolchain needed three fixes:
   compiler reports headers via matching relative paths instead of
   sandbox-absolute ones (otherwise every system header trips "absolute path
   inclusion");
-- `-no-canonical-prefixes` on compile + link; the Bootlin config adds gcc-only
+- `-no-canonical-prefixes` on **compile only** — the reason for it is entirely
+  about how the compile step reports builtin header dirs, and adding it to the
+  link action changed zig link outputs for no benefit (see the comment on
+  `_NO_CANONICAL_FLAGS`); the Bootlin config adds gcc-only
   `-fno-canonical-system-headers` and an optional `--sysroot`.
 
 ## Relocatable ld scripts
