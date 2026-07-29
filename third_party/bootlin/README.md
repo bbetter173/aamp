@@ -2,9 +2,15 @@
 
 The GNU cross-toolchain for the XiOne AAMP build: Bootlin
 `armv7-eabihf--glibc--stable-2022.08-1` (gcc 11.3 / glibc 2.35, hard-float, new
-C++11 string ABI). The tree is fetched by the `xione_bootlin_toolchain`
-`http_archive` in `//MODULE.bazel` (URL + sha256), with
-`toolchain.BUILD.bazel` overlaid into the fetched repo as its `BUILD` file.
+C++11 string ABI). The tree is fetched by the `xione_bootlin_toolchain` repo rule
+in `//MODULE.bazel` — `//bazel/repo_rules:bootlin_toolchain.bzl`, an
+`http_archive` in all but name (URL + sha256) plus the ld-script fixup below —
+with `toolchain.BUILD.bazel` overlaid into the fetched repo as its `BUILD` file.
+
+Both targets here are tagged `manual`: each names a label inside the fetched repo,
+so leaving them in wildcard expansion made `bazel build //...` fetch a ~500 MB
+Linux-x86_64 archive on every host, macOS included, for targets that are skipped
+as incompatible anyway.
 
 - `BUILD.bazel` — an `alias` to the fetched tree and the `toolchain(...)`
   registration for `//bazel/platforms:xione`.
@@ -56,13 +62,23 @@ Making it work for an external-repo toolchain needed three fixes:
 
 Bootlin's `ld` does not prepend the active `--sysroot` to a linker script's
 absolute `GROUP` paths (not even its own default sysroot), so
-`GROUP ( /lib/libc.so.6 … )` escaped to the host x86_64 libc. The fetch's
-`patch_cmds` rewrite those paths to `=`-prefixed form so `ld` prepends whichever
-sysroot is active; `//third_party/xione_sysroot`'s `assemble_sysroot` does the
-same for the merged tree.
+`GROUP ( /lib/libc.so.6 … )` escaped to the host x86_64 libc. The fetch rewrites
+those paths to `=`-prefixed form, so `ld` prepends whichever sysroot is active.
+
+Exactly one script in this toolchain needs it, `usr/lib/libc.so`;
+`lib/libgcc_s.so` is an ld script too but names its members relatively. The rewrite
+is done in Starlark (`ctx.read`/`ctx.file` over the `*.so` files, found with
+`path.readdir()`) rather than by shelling out, so the fetch stays host-tool-free
+and works from a macOS client — the previous `sed -i -E` did not. It fails loudly
+if it finds nothing to rewrite, because an unrelocated script does not error at
+link time, it silently resolves against the host libc.
+
+`//third_party/xione_sysroot`'s `assemble_sysroot` applies the same rewrite to the
+merged tree.
 
 ## Updating
 
-Bump the `xione_bootlin_toolchain` `http_archive` URL + sha256 in
-`//MODULE.bazel`. If the compiler version moves, re-check the device ABI match
-(hard-float VFP, `_GLIBCXX_USE_CXX11_ABI=1`, glibc floor).
+Bump the `xione_bootlin_toolchain` URL + sha256 in `//MODULE.bazel`. If the
+compiler version moves, re-check the device ABI match (hard-float VFP,
+`_GLIBCXX_USE_CXX11_ABI=1`, glibc floor) — and note the fetch will fail if the ld
+scripts moved, which is the intended prompt to re-check this section.

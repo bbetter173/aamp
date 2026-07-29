@@ -1,8 +1,8 @@
 # Bootlin armv7-eabihf gcc 11.3 / glibc 2.35 toolchain for the XiOne AAMP build.
 #
-# The toolchain tree is fetched by the `xione_bootlin_toolchain` http_archive
-# in //MODULE.bazel using toolchain.BUILD.bazel (in the fetched repo) as its
-# overlay build file. It is consumed by //:aamp via rules_foreign_cc,
+# The toolchain tree is fetched by the `xione_bootlin_toolchain` repo rule in
+# //MODULE.bazel (//bazel/repo_rules:bootlin_toolchain.bzl), using
+# toolchain.BUILD.bazel (in the fetched repo) as its overlay build file. It is consumed by //:aamp via rules_foreign_cc,
 # which stages it into $EXT_BUILD_DEPS and points cmake/xione-armhf.cmake at it
 # through XIONE_TOOLCHAIN_DIR. See README.md.
 

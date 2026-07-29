@@ -61,30 +61,18 @@ register_toolchains(
 # Bootlin armv7-eabihf gcc 11.3 / glibc 2.35 toolchain — the compiler
 # cmake/xione-armhf.cmake is written for. URL + sha256 match the toolchain
 # scripts/setup-xione-container.sh installs on feat/xione-build-tooling.
-http_archive(
+#
+# Fetched by a repository rule rather than http_archive because the sysroot's ld
+# scripts need one rewrite to be relocatable, and doing that in Starlark keeps the
+# fetch free of host tools — as `patch_cmds` it was a find/grep/sed pipeline whose
+# `sed -i -E` is GNU-only, so it failed on a macOS client. See the rule's docstring
+# for the ld/--sysroot detail; //bazel/rules:xione_sysroot.bzl relies on the scripts
+# arriving already fixed.
+bootlin_toolchain = use_repo_rule("//bazel/repo_rules:bootlin_toolchain.bzl", "bootlin_toolchain")
+
+bootlin_toolchain(
     name = "xione_bootlin_toolchain",
     build_file = "//third_party/bootlin:toolchain.BUILD.bazel",
-    # Make the sysroot's glibc ld scripts relocatable. This SDK's ld does not
-    # prepend a relocated --sysroot to a linker script's absolute GROUP paths —
-    # not even for its own default sysroot — so `GROUP ( /lib/libc.so.6 ... )`
-    # escapes to the host x86_64 libc ("file format not recognized") on every
-    # link that uses this sysroot (e.g. //third_party/ethanlog, and AAMP where
-    # this is the winning --sysroot). Prefixing each absolute path with `=`
-    # forces ld to prepend whatever --sysroot is active. Idempotent; scoped to
-    # GROUP/INPUT/AS_NEEDED lines. assemble_sysroot applies the same rewrite to
-    # the merged AAMP sysroot (see //bazel/rules:xione_sysroot.bzl).
-    #
-    # Rewrite through a temp file rather than with `sed -i -E`: `-i` without an
-    # argument is GNU-only (BSD/macOS sed reads the next argument as the backup
-    # suffix, so `-E` becomes the suffix and the expression becomes a filename).
-    # Fetches always run on the local host, even under --config=rbe, so a macOS
-    # client would fail here. Same form assemble_sysroot uses.
-    patch_cmds = [
-        "find arm-buildroot-linux-gnueabihf/sysroot -type f | while read -r f; do" +
-        " if grep -qI 'GNU ld script' \"$f\" 2>/dev/null; then" +
-        " sed -E '/GROUP|INPUT|AS_NEEDED/ s#([ (])/#\\1=/#g' \"$f\" > \"$f.relocfix\";" +
-        " rm -f \"$f\"; mv \"$f.relocfix\" \"$f\"; fi; done",
-    ],
     sha256 = "64329b3e72350ceda65997368395a945ef83769013d82414dc5f2021c33f2d44",
     strip_prefix = "armv7-eabihf--glibc--stable-2022.08-1",
     url = "https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--glibc--stable-2022.08-1.tar.bz2",
