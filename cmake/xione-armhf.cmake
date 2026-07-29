@@ -95,16 +95,24 @@ set(CMAKE_FIND_ROOT_PATH "${XIONE_SYSROOT}")
 # gcc's --sysroot only searches <sysroot>/usr/lib and <sysroot>/lib, NOT the
 # arm-linux-gnueabihf multiarch subdir where the device libraries actually
 # live.  Hardcoded -l dependencies (e.g. -lsystemd, -lethanlog) therefore fail
-# to link without an explicit -L.  Add the multiarch dir to every link, and the
-# libdash include dir (config.h lives in a non-standard location) to every
-# compile, so builds using this toolchain need no extra flags.
+# to link without an explicit -L.  Add the multiarch dir to every link, so
+# builds using this toolchain need no extra link flags.
+#
+# There is deliberately no matching compile-flag seed here. An earlier revision
+# set CMAKE_{C,CXX}_FLAGS_INIT to "-I${XIONE_SYSROOT}/include/libdash", but that
+# never reached a compiler: the ABI block below re-sets the same two variables as
+# CACHE entries, and creating a cache entry removes the normal variable of the
+# same name from scope. It also pointed at include/libdash, while
+# assemble_sysroot stages those headers at usr/include/libdash. Since the build
+# has always worked without it, the flag is dropped rather than corrected —
+# libdash headers resolve through the sysroot's default include path and CPATH.
+# A consumer that genuinely needs the explicit -I should append it to the CACHE
+# set below, with the usr/ prefix.
 # ---------------------------------------------------------------------------
 set(_xione_libdir "${XIONE_SYSROOT}/usr/lib/arm-linux-gnueabihf")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "-L${_xione_libdir}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-L${_xione_libdir}")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "-L${_xione_libdir}")
-set(CMAKE_CXX_FLAGS_INIT           "-I${XIONE_SYSROOT}/include/libdash")
-set(CMAKE_C_FLAGS_INIT             "-I${XIONE_SYSROOT}/include/libdash")
 
 # The _INIT flags above only seed the cache var when it is otherwise unset. Under
 # rules_foreign_cc (see //third_party/aamp:aamp) the linker-flag cache vars arrive
