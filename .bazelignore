@@ -6,3 +6,6 @@ bazel-testlogs
 bazel-aamp
 # CMake out-of-tree build dir (see cmake/xione-armhf.cmake).
 build-xione
+# CMake unit-test build output. Its _deps directory contains fetched projects
+# with their own BUILD files, which must not become packages in this workspace.
+test/utests/build
