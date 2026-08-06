@@ -1,0 +1,33 @@
+# Bazel configuration for the XiOne cross-build. See XIONE-BUILD.md.
+#
+# Nothing here is required by the CMake build; a plain `cmake` invocation is
+# unaffected by this file.
+
+# The AAMP source tree is the workspace root, so //:all_srcs globs it. Keep the
+# convenience symlinks out of the way of that glob (see also .bazelignore).
+common --symlink_prefix=bazel-
+
+#
+# Hermeticity
+#
+# Mirrors webrtc-sim's .bazelrc block of the same name, so the two repos behave the
+# same way. This build already uses no host C/C++ toolchain (every compile goes
+# through the pinned Bootlin toolchain); disabling autodetection turns that from an
+# observation into an invariant.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
+common --repo_env=DO_NOT_TRACK=true
+
+# Keep the host environment out of action keys; without this, actions inherit a
+# PATH that varies per machine.
+build --incompatible_strict_action_env
+
+# rules_foreign_cc shells out to CMake/Ninja and needs a real filesystem layout,
+# and the AAMP build is one large action; the default sandbox is fine but the
+# action is long, so don't let a slow link look like a hang.
+build --verbose_failures
+
+# The cross build only ever targets the XiOne. Spelling it here would break host
+# builds of everything else, so it stays an explicit flag:
+#   bazel build //:aamp --platforms=//bazel/platforms:xione

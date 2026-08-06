@@ -1,0 +1,19 @@
+package(default_visibility = ["//visibility:public"])
+
+# Sky XiOne set-top box: armv7 NEON hard-float, glibc 2.35, gcc 11.3 with the
+# new C++11 string ABI. AAMP is compiled by the Bootlin toolchain via
+# rules_foreign_cc and cmake/xione-armhf.cmake, matched to the device.
+#
+# The box's kernel is aarch64 but its RDK app userspace is 32-bit armv7
+# (/usr/lib/libaamp.so is ELF32 EM_ARM), which is what this platform targets —
+# don't be misled by `uname`. See XIONE-BUILD.md.
+platform(
+    name = "xione",
+    constraint_values = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+        "//bazel/constraints:hard-float",
+        "//bazel/constraints:neon-vfpv4",
+        "//bazel/constraints:xione-stb",
+    ],
+)

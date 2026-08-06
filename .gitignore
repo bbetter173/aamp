@@ -31,3 +31,10 @@ middleware/test/utests/build
 # Build artifacts
 abrsim/abrsim
 simnet/simnet/simnet
+
+# XiOne cross-build working dir (out-of-tree cmake build against cmake/xione-armhf.cmake)
+/build-xione/
+
+# Bazel convenience symlinks and release staging (see XIONE-BUILD.md)
+/bazel-*
+/staging-xione/

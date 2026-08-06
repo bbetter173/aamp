@@ -1,0 +1,16 @@
+# Overlay BUILD for the deb-assembled XiOne sysroot (see
+# //bazel/repo_rules:deb_sysroot.bzl and //third_party/xione_sysroot).
+#
+# The merged tree under sysroot/ holds headers, pkg-config files, and link
+# stand-in .so's for the packages in xione-debs.json — enough for AAMP's
+# configure to pass (validated out-of-Bazel). Still to be overlaid at cmake()
+# staging time before a full build: the Bootlin glibc headers/CRT, the built
+# //third_party/ethanlog and //third_party/jsc artifacts, and the cross-built
+# libdash (a stub libdash.pc is present so configure resolves).
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "sysroot",
+    srcs = glob(["sysroot/**"], allow_empty = False),
+)

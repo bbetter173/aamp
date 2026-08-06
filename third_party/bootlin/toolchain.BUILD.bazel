@@ -1,0 +1,136 @@
+# Overlay BUILD file for the fetched Bootlin toolchain tree (see
+# //third_party/bootlin:BUILD.bazel for context).
+#
+# The whole tree — cross gcc/g++/binutils under bin/, the target sysroot under
+# arm-buildroot-linux-gnueabihf/, and the runtime libs — is exposed as one
+# filegroup and staged into the rules_foreign_cc build via a `data` dep. AAMP's
+# cmake/xione-armhf.cmake resolves the actual compiler/sysroot paths from
+# XIONE_TOOLCHAIN_DIR.
+#
+# A cc_toolchain also lives here (not in //third_party/bootlin/) because
+# gcc_toolchain_config emits package-relative paths for both tool_paths
+# (`bin/<triple>-gcc`) and cxx_builtin_include_directories — both resolve
+# against the source-tree package containing cc_toolchain, so the rule must sit
+# next to bin/ and lib/. It
+# satisfies rules_foreign_cc's `@bazel_tools//tools/cpp:toolchain_type`
+# resolution for //bazel/platforms:xione; the `toolchain()` wrapper that
+# registers it lives in //third_party/bootlin so it can name local constraints.
+
+load("@aamp//bazel/toolchain:gcc_toolchain.bzl", "gcc_toolchain_config")
+load("@rules_cc//cc:defs.bzl", "cc_toolchain")
+
+package(default_visibility = ["//visibility:public"])
+
+# Convenience alias to the whole fetched toolchain tree, staged into the
+# rules_foreign_cc build under $EXT_BUILD_DEPS/bootlin.
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+)
+
+# Just the target sysroot subtree (glibc headers/CRT/loader), for overlaying
+# into the assembled XiOne sysroot. AAMP's cmake/xione-armhf.cmake sets
+# CMAKE_SYSROOT to the assembled sysroot, so glibc must live there.
+filegroup(
+    name = "glibc",
+    srcs = glob(["arm-buildroot-linux-gnueabihf/sysroot/**"]),
+)
+
+# The cross `nm`, for build actions that must read ELF32 ARM objects. The host's
+# binutils cannot be relied on for that: whether it works depends on how the distro
+# configured BFD's target list, and host `strip` already fails outright on these
+# files with "Unable to recognise the architecture of the input file". This is an
+# x86_64 host binary and runs standalone. Consumed by //third_party/jsc.
+filegroup(
+    name = "nm",
+    srcs = ["bin/arm-buildroot-linux-gnueabihf-nm"],
+)
+
+# The cross `readelf`, for the same reason as `:nm` — consumed by the artifact
+# assertions in //tools/verify.
+filegroup(
+    name = "readelf",
+    srcs = ["bin/arm-buildroot-linux-gnueabihf-readelf"],
+)
+
+# Every file rules_cc may need to run the cross toolchain. The Bootlin tree is
+# self-contained (gcc, binutils, the target sysroot, gcc's own libexec), so one
+# glob feeds all the cc_toolchain file-group slots.
+filegroup(
+    name = "toolchain_files",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "**/*.txt",
+            "**/README*",
+            "buildroot.config",
+        ],
+    ),
+)
+
+# GNU target triple = the cross compiler's binary prefix (bin/<triple>-gcc, …).
+gcc_toolchain_config(
+    name = "xione_toolchain_config",
+    # Package-relative header search roots the compiler is allowed to read:
+    # gcc's internal + fixed headers, the target libstdc++ tree (generic +
+    # target-specific bits/c++config.h), and the sysroot libc headers.
+    # Paths are package-relative; gcc_toolchain_config prepends the toolchain
+    # repo's workspace_root so they resolve under external/<repo>/ at the
+    # execroot (bare paths would otherwise miss the external/ prefix and gcc's
+    # reported headers would read as "absolute path inclusions").
+    # Listed in gcc's own search order (libstdc++ before the gcc-internal and
+    # libc headers); the config also emits each as a relative -isystem flag, so
+    # order is the include search order.
+    cxx_builtin_include_directories = [
+        "arm-buildroot-linux-gnueabihf/include/c++/11.3.0",
+        "arm-buildroot-linux-gnueabihf/include/c++/11.3.0/arm-buildroot-linux-gnueabihf",
+        "lib/gcc/arm-buildroot-linux-gnueabihf/11.3.0/include",
+        "lib/gcc/arm-buildroot-linux-gnueabihf/11.3.0/include-fixed",
+        "arm-buildroot-linux-gnueabihf/sysroot/usr/include",
+    ],
+    # armv7 NEON hard-float, matching the device (cmake/xione-armhf.cmake).
+    # Only applied to native cc_* built under //bazel/platforms:xione — AAMP
+    # itself is compiled via its own CMake toolchain file.
+    cxx_standard = "c++11",
+    # --sysroot for compile+link so plain cc_* built under //bazel/platforms:xione
+    # (e.g. //third_party/ethanlog, which needs libc) resolve the ARM libc from
+    # the Bootlin sysroot instead of falling back to the host's /lib.
+    #
+    # rules_foreign_cc builds (libdash, AAMP) also set CMAKE_SYSROOT to the
+    # assembled base/aamp sysroot via cmake/xione-armhf.cmake, so their links
+    # carry TWO --sysroot flags (base_sysroot then this one, which wins as the
+    # last). That is harmless because assemble_sysroot rewrites the merged glibc
+    # ld scripts to `=`-prefixed paths (`GROUP ( =/lib/libc.so.6 ... )`), which
+    # makes ld prepend whichever --sysroot is active — the ARM libc resolves the
+    # same under either root. Without that rewrite the absolute GROUP paths would
+    # escape to the host x86_64 libc; see //bazel/rules:xione_sysroot.bzl.
+    sysroot = "arm-buildroot-linux-gnueabihf/sysroot",
+    target_compile_flags = [
+        "-march=armv7-a",
+        "-mfpu=neon-vfpv4",
+        "-mfloat-abi=hard",
+        # gcc-only companion to the shared -no-canonical-prefixes: stops gcc
+        # realpath-ing individual system-header paths (which would reintroduce
+        # the absolute cache path and trip "absolute path inclusion"). clang
+        # rejects this flag, so it stays out of the shared config.
+        "-fno-canonical-system-headers",
+    ],
+    target_cpu = "armv7",
+    target_libc = "glibc_2.35",
+    target_triple = "arm-buildroot-linux-gnueabihf",
+    toolchain_identifier = "arm_buildroot_linux_gnueabihf_bootlin",
+)
+
+cc_toolchain(
+    name = "xione_cc_toolchain",
+    all_files = ":toolchain_files",
+    ar_files = ":toolchain_files",
+    as_files = ":toolchain_files",
+    compiler_files = ":toolchain_files",
+    dwp_files = ":toolchain_files",
+    linker_files = ":toolchain_files",
+    objcopy_files = ":toolchain_files",
+    strip_files = ":toolchain_files",
+    toolchain_config = ":xione_toolchain_config",
+    toolchain_identifier = "arm_buildroot_linux_gnueabihf_bootlin",
+)

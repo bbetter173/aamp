@@ -1,0 +1,35 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+# EthanLog client library. The source (ethanlog.c + ethanlog.h) is fetched from
+# rdkcentral/Dobby at a pinned commit by @ethanlog_src (see
+# //bazel/repo_rules:ethanlog_src.bzl and //MODULE.bazel), not vendored here —
+# see README.md.
+#
+# This is compiled + linked by the registered Bootlin
+# cc_toolchain (//third_party/bootlin:xione_cc_toolchain): the target is
+# target_compatible_with [armv7, linux], so when it is pulled into
+# //third_party/xione_sysroot:aamp_sysroot under //bazel/platforms:xione,
+# toolchain resolution selects Bootlin, which applies --sysroot via
+# gcc_toolchain_config (keeping the link off the host libc). ethanlog.c is pure
+# C over libc + raw syscalls, so the C++ ABI is irrelevant. The resulting .so is
+# staged into the sysroot for cmake/FindEthanLog.cmake. See README.md.
+
+# The output soname MUST be libethanlog.so.3: cmake/FindEthanLog.cmake
+# resolves the dependency via find_library(NAMES ... libethanlog.so.3 ...) and
+# the runtime device ships libethanlog.so.3.
+cc_binary(
+    name = "libethanlog.so.3",
+    srcs = ["@ethanlog_src//:ethanlog.c"],
+    # ethanlog.c uses TEMP_FAILURE_RETRY and syscall(SYS_gettid) — GNU libc
+    # extensions that require _GNU_SOURCE (Dobby's own CMake build sets it).
+    copts = ["-D_GNU_SOURCE"],
+    linkopts = ["-Wl,-soname,libethanlog.so.3"],
+    linkshared = True,
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+    ],
+    deps = ["@ethanlog_src//:headers"],
+)

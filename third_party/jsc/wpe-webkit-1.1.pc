@@ -1,0 +1,20 @@
+# Stub pkg-config for wpe-webkit-1.1, standing in for the real WPEWebKit on the
+# XiOne build host. It advertises ONLY the JavaScriptCore C API: the JSC C-API
+# headers (sourced at fetch time from pinned Debian WebKitGTK debs by @jsc_deb
+# and staged under include/JavaScriptCore) and the generated link stub
+# (libWPEWebKit-1.1.so.0). This is what AAMP's CMakeLists.txt reads via
+# pkg_check_modules(WPE_WEBKIT wpe-webkit-1.1) to obtain WPE_WEBKIT_INCLUDEDIR
+# and WPE_WEBKIT_LINK_LIBRARIES for libaampjsbindings.so. At runtime the
+# DT_NEEDED (libWPEWebKit-1.1.so.0) binds to the real library on the device.
+#
+# Paths are resolved relative to this file (${pcfiledir}) so it works wherever
+# the jsc tree is staged. See README.md.
+prefix=${pcfiledir}
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: WPE WebKit (JavaScriptCore C API stub)
+Description: JSC C API headers + link stub for the XiOne AAMP jsbindings build
+Version: 1.1.0
+Cflags: -I${includedir}
+Libs: -L${libdir} -lWPEWebKit-1.1
