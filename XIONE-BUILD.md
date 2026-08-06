@@ -1,5 +1,10 @@
 # XiOne cross-build
 
+> [!NOTE]
+> This lives in a **fork** of [AAMP](https://github.com/rdkcentral/aamp) and is an
+> experiment, until AAMP upstreams some of the changes needed for the integration.
+> It is **not ready for production use**.
+
 Hermetic Bazel cross-build of AAMP for the Sky XiOne (armv7 NEON hard-float,
 glibc 2.35, new C++11 string ABI). Produces the nine shared libraries the device
 needs, and publishes them as release tarballs for downstream consumers.

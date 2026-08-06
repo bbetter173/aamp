@@ -17,6 +17,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
+> [!NOTE]
+> This is a **fork** of [AAMP](https://github.com/rdkcentral/aamp) carrying Bazel
+> build tooling as an experiment, until AAMP upstreams some of the changes needed
+> for the integration. It is **not ready for production use**. For production,
+> use upstream AAMP and its CMake build.
+>
+> See [XIONE-BUILD.md](XIONE-BUILD.md) for what the fork adds.
+
 # ![](images/logo.png) <br/> AAMP / Universal Video Engine (UVE)
 
 ### Advanced Adaptive Media Player (AAMP)
