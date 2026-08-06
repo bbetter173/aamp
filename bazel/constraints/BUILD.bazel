@@ -1,0 +1,30 @@
+package(default_visibility = ["//visibility:public"])
+
+# Device/board class.
+#
+# Marks the Sky XiOne set-top-box cross build (Bootlin gcc 11.3 / glibc 2.35 /
+# new C++11 ABI, driven via rules_foreign_cc + cmake/xione-armhf.cmake). Guards
+# the heavy cross-build targets so a host `bazel build //...` skips them instead
+# of trying to cross-compile.
+constraint_setting(name = "board")
+
+constraint_value(
+    name = "xione-stb",
+    constraint_setting = "board",
+)
+
+# Float ABI and FPU, needed to distinguish the XiOne's armv7 hard-float NEON
+# target from a soft-float or non-NEON armv7.
+constraint_setting(name = "float-abi")
+
+constraint_value(
+    name = "hard-float",
+    constraint_setting = "float-abi",
+)
+
+constraint_setting(name = "fpu")
+
+constraint_value(
+    name = "neon-vfpv4",
+    constraint_setting = "fpu",
+)

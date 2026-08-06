@@ -27,6 +27,9 @@ function(xcode_define_schema new_schema)
 endfunction()
 
 project (AAMP)
+# Allow find_package() to locate project-provided modules (e.g. FindEthanLog.cmake) used by
+# cross-compile sysroots that do not ship a CMake config for those libraries.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -498,6 +501,7 @@ set(LIBAAMP_SOURCES
 	downloader/AampCurlStore.cpp downloader/AampCurlStore.h downloader/AampCurlDefine.h
 	AampDRMLicPreFetcher.cpp AampDRMLicPreFetcher.h
 	AampCMCDCollector.cpp AampCMCDCollector.h
+	AampCMCDSerializer.cpp AampCMCDSerializer.h
 	downloader/AampCurlDownloader.cpp downloader/AampCurlDownloader.h
 	ID3Metadata.cpp ID3Metadata.hpp
 	abr/abr.cpp abr/abr.h

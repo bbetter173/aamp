@@ -18,7 +18,7 @@
  */
 
 /**
- * @file AampCMCDCollector.cpp
+ * @file AampCMCDCollector.h
  * @brief Class to collect the CMCD Data
  */
 
@@ -26,21 +26,21 @@
 #ifndef __AAMP_CMCD_COLLECTOR_H__
 #define __AAMP_CMCD_COLLECTOR_H__
 
-#include <iostream>
-#include <memory>
 #include <map>
-#include <exception>
+#include <mutex>
+#include <string>
+#include <vector>
 
-#include <CMCDHeaders.h>
-#include <AudioCMCDHeaders.h>
-#include <VideoCMCDHeaders.h>
-#include <ManifestCMCDHeaders.h>
-#include <SubtitleCMCDHeaders.h>
-#include <uuid/uuid.h>
 #include "AampDefine.h"
 #include "AampLogManager.h"
-#include <algorithm>
+#include "AampMediaType.h"
+#include "DrmMediaFormat.h"
 #include "abr.h"
+
+namespace AampCMCD
+{
+	struct Entry;
+}
 
 /**
  * @class AampCMCDCollector
@@ -110,25 +110,126 @@ public:
 	/**
 	 * @brief CMCDGetHeaders Get the CMCD headers to add in download request
 	 *
+	 * @param[in] mediaType - media type of the request
+	 * @param[out] customHeader - CMCD header lines to attach to the request
+	 * @param[in] currentUrl - URL of the request the headers ride on; used to
+	 *            express nor as a relative reference. When empty, nor is omitted.
 	 * @return None
 	 */
-	void CMCDGetHeaders(AampMediaType mediaType ,  std::vector<std::string> &customHeader);
+	void CMCDGetHeaders(AampMediaType mediaType ,  std::vector<std::string> &customHeader, const std::string &currentUrl = "");
 	void SetBitrates(AampMediaType mediaType,const std::vector<BitsPerSecond> bitrates);
 	void SetTrackData(AampMediaType mediaType,bool bufferRedStatus,int bufferedDuration,int currentBitrate, bool IsMuxed=false);
+
+	/**
+	 * @brief CMCDSetSessionParams Push streaming format (sf) and content ID (cid) to all media types.
+	 *        Strips the query string and fragment from rawUrl before using it as cid, so auth
+	 *        tokens carried in the manifest URL are not leaked. Called once after Initialize().
+	 *
+	 * @param[in] mediaFormat - session media format, mapped to the CMCD sf token
+	 * @param[in] rawUrl - manifest URL used as the content id
+	 * @return None
+	 */
+	void CMCDSetSessionParams(MediaFormat mediaFormat, const std::string& rawUrl);
+
+	/**
+	 * @brief CMCDSetLiveStatus Push live/VOD stream type (st) to all media types.
+	 *        Called from the fragment collectors after manifest parse.
+	 *
+	 * @param[in] isLive - true for live streams ("l"), false for VOD ("v")
+	 * @return None
+	 */
+	void CMCDSetLiveStatus(bool isLive);
+
+	/**
+	 * @brief CMCDSetPlaybackRate Push the current playback rate (pr) to all media types.
+	 *        pr is emitted only when the rate is not 1 (normal play); 0 means "not playing".
+	 *
+	 * @param[in] rate - current playback rate
+	 * @return None
+	 */
+	void CMCDSetPlaybackRate(float rate);
+
+	/**
+	 * @brief CMCDSetFragmentDuration Set the object duration (d) in ms for one media type.
+	 *
+	 * @param[in] mediaType - media type of the request
+	 * @param[in] durationMs - object duration in milliseconds; 0 omits the key
+	 * @return None
+	 */
+	void CMCDSetFragmentDuration(AampMediaType mediaType, int durationMs);
+
+	/**
+	 * @brief CMCDSetMeasuredThroughput Set the measured throughput (mtp) in kbps for one media type.
+	 *
+	 * @param[in] mediaType - media type of the request
+	 * @param[in] kbps - measured throughput in kbps; 0 omits the key
+	 * @return None
+	 */
+	void CMCDSetMeasuredThroughput(AampMediaType mediaType, int kbps);
+
+	/**
+	 * @brief CMCDSetStartupUrgent Set the startup-urgent flag (su) for one media type.
+	 *        Level-triggered: recomputed by the engine on every request.
+	 *
+	 * @param[in] mediaType - media type of the request
+	 * @param[in] startupUrgent - true during tune, seek or rebuffer recovery
+	 * @return None
+	 */
+	void CMCDSetStartupUrgent(AampMediaType mediaType, bool startupUrgent);
 private:
+	/**
+	 * @enum StreamCategory
+	 * @brief Family of CMCD keys emitted for a media type (mirrors the legacy per-type CMCDHeaders subclasses).
+	 */
+	enum class StreamCategory
+	{
+		eMANIFEST,  ///< Manifest/playlist requests: sid and ot=m only
+		eVIDEO,     ///< Video segment requests: full object/request/status key set
+		eAUDIO,     ///< Audio segment requests: full object/request/status key set
+		eSUBTITLE   ///< Subtitle requests: sid and ot=s only
+	};
+
+	/**
+	 * @struct CMCDState
+	 * @brief Per-media-type CMCD reporting state.
+	 */
+	struct CMCDState
+	{
+		StreamCategory category{StreamCategory::eMANIFEST}; ///< Key family emitted for this media type
+		std::string mediaTypeLabel{};  ///< Legacy media type name ("VIDEO", "INIT_AUDIO", "MUXED", ...); selects the ot value
+		int firstByte{0};              ///< Time to first byte of the last download (ms)
+		int lastByte{0};               ///< Time to last byte of the last download (ms)
+		int dnsLookUpTime{0};          ///< DNS lookup time of the last download (ms)
+		int bitrate{0};                ///< Encoded bitrate of the requested object (kbps); 0 = unknown, br/rtp omitted
+		int topBitrate{0};             ///< Highest bitrate available for this track (kbps); 0 = unknown, tb omitted
+		int bufferLength{0};           ///< Buffered media ahead of the playhead (ms)
+		bool bufferStarvation{false};  ///< CMCD bs: latched on starvation, sticky until reported once, then cleared
+		std::string nextUrl{};         ///< URL of the next expected object request (nor); empty = omit
+		std::string nextRange{};       ///< Byte range of the next request (nrr); SegmentList/SegmentBase MPDs
+		std::string streamingFormat{}; ///< CMCD sf token: "d" (DASH), "h" (HLS), "s" (Smooth); empty = omit
+		std::string streamType{};      ///< CMCD st token: "v" (VOD) or "l" (live); empty = omit until known
+		std::string contentId{};       ///< CMCD cid value (String type); empty = omit
+		float playbackRate{1.0f};      ///< CMCD pr value; 1.0f = normal play (pr omitted), 0 = not playing
+		int fragmentDuration{0};       ///< CMCD d value: object duration in ms; 0 = omit
+		int measuredThroughput{0};     ///< CMCD mtp value: measured throughput in kbps; 0 = omit
+		bool startupUrgent{false};     ///< CMCD su flag: true when the request is startup/seek/rebuffer urgent
+	};
+
+	/**
+	 * @brief Build the CMCD entries for one media type's current state.
+	 *        Consumes the bs latch: a latched starvation is reported once, then cleared.
+	 *
+	 * @param[in,out] state Per-media-type CMCD state.
+	 * @return Entries ready for serialization (the serializer sorts them).
+	 */
+	std::vector<AampCMCD::Entry> BuildEntries(CMCDState &state, const std::string &currentUrl) const;
+
 	bool bCMCDEnabled;			/**< CMCD enable/disable flag  */
-	typedef std::map<int, CMCDHeaders *> StreamTypeCMCD;
-	typedef std::map<int, CMCDHeaders *>::iterator StreamTypeCMCDIter;
+	typedef std::map<int, CMCDState> StreamTypeCMCD;
+	typedef StreamTypeCMCD::iterator StreamTypeCMCDIter;
 	StreamTypeCMCD mCMCDStreamData;
 	std::string mTraceId;
 	std::mutex myMutex;
-	/**
-	 * @brief convertHexa Convert decimal to hexadecimal
-	 *
-	 * @param[in] number - decimal number
-	 * @return hexadecimal number
-	 */
-	std::string convertHexa(long long number);
 };
 
 

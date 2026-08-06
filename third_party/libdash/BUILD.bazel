@@ -1,0 +1,59 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+# libdash cross-build for the XiOne, via rules_foreign_cc driving libdash's own
+# CMake (bitmovin stable_3_0 + 12 RDK patches, applied by the @libdash archive).
+# Builds against the base sysroot (deb tree + Bootlin glibc) using the shared
+# xione-armhf.cmake toolchain file (see
+# cmake/xione-armhf.cmake). Produces
+# libdash.so; its headers are staged
+# straight from source (see //third_party/xione_sysroot:aamp_sysroot) since the
+# CMakeLists installs only the lib. Consumed by the AAMP cross-build via the
+# merged aamp_sysroot. Tagged manual (heavy cross-build; only reached through
+# //:aamp) so it never enters a `bazel build //...` wildcard.
+# See README.md.
+
+cmake(
+    name = "libdash",
+    cache_entries = {
+        "CMAKE_TOOLCHAIN_FILE": "$$EXT_BUILD_ROOT/$(execpath //:cmake/xione-armhf.cmake)",
+        # Derived from a file inside the toolchain, not the literal
+        # `external/+http_archive+<name>` canonical-repo spelling, which is
+        # Bazel-internal and has changed form once already. See the same entry on
+        # //:aamp for the full rationale.
+        "XIONE_TOOLCHAIN_DIR": "$$EXT_BUILD_ROOT/$$(dirname $$(dirname $(execpath @xione_bootlin_toolchain//:nm)))",
+        "XIONE_SYSROOT": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:base_sysroot)",
+        "CMAKE_MACOSX_RPATH": "FALSE",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+    },
+    data = [
+        "//third_party/xione_sysroot:base_sysroot",
+        "//:cmake/xione-armhf.cmake",
+        "@xione_bootlin_toolchain//:all",
+        # Anchor for the XIONE_TOOLCHAIN_DIR $(execpath) above.
+        "@xione_bootlin_toolchain//:nm",
+    ],
+    env = {
+        "PKG_CONFIG_SYSROOT_DIR": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:base_sysroot)",
+        "PKG_CONFIG_LIBDIR": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:base_sysroot)/usr/lib/arm-linux-gnueabihf/pkgconfig",
+        "PKG_CONFIG_PATH": "",
+        # The Bootlin gcc is not multiarch-aware, so --sysroot only searches
+        # <sysroot>/usr/include, not the arm-linux-gnueabihf multiarch subdir
+        # where curl/curl.h and friends live. gcc reads CPATH for extra system
+        # include dirs (applies to C and C++), bypassing CMake's flag handling —
+        # cleaner than diverging the shared toolchain file, and it stacks with
+        # the multiarch symlink bridge for headers that resist it.
+        "CPATH": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:base_sysroot)/usr/include/arm-linux-gnueabihf",
+    },
+    # Ninja generator: uses the registered hermetic ninja toolchain and avoids
+    # rules_foreign_cc bootstrapping GNU Make from source (which fails to compile
+    # against the host LLVM glibc headers).
+    generate_args = ["-GNinja"],
+    lib_source = "@libdash//:all_srcs",
+    out_shared_libs = ["libdash.so"],
+    tags = ["manual"],
+    target_compatible_with = ["//bazel/constraints:xione-stb"],
+    # libdash's install target builds the test binary (needs libcap/libidn2 not
+    # in the sysroot); build just the shared lib.
+    targets = ["dash"],
+    visibility = ["//visibility:public"],
+)

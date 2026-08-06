@@ -77,7 +77,7 @@ void AampCMCDCollector::CMCDSetNextRangeRequest(std::string nextrange,long bandw
 *
 * @return None
 */
-void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader)
+void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader, const std::string &currentUrl)
 {
  }
  
@@ -106,5 +106,29 @@ void AampCMCDCollector::SetBitrates(AampMediaType mediaType,const std::vector<Bi
 void AampCMCDCollector::SetTrackData(AampMediaType mediaType,bool bufferRedStatus,int bufferedDuration,int currentBitrate, bool IsMuxed)
 {
 
+}
+
+void AampCMCDCollector::CMCDSetSessionParams(MediaFormat mediaFormat, const std::string& rawUrl)
+{
+}
+
+void AampCMCDCollector::CMCDSetLiveStatus(bool isLive)
+{
+}
+
+void AampCMCDCollector::CMCDSetPlaybackRate(float rate)
+{
+}
+
+void AampCMCDCollector::CMCDSetFragmentDuration(AampMediaType mediaType, int durationMs)
+{
+}
+
+void AampCMCDCollector::CMCDSetMeasuredThroughput(AampMediaType mediaType, int kbps)
+{
+}
+
+void AampCMCDCollector::CMCDSetStartupUrgent(AampMediaType mediaType, bool startupUrgent)
+{
 }
 

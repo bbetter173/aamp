@@ -1,0 +1,76 @@
+# The pinned deb manifest and overlay BUILD for @xione_sysroot, consumed by the
+# deb_sysroot repo rule in //MODULE.bazel. See //bazel/repo_rules:deb_sysroot.bzl
+# and README.md.
+
+load("//bazel/rules:xione_sysroot.bzl", "assemble_sysroot")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "xione-debs.json",
+    "sysroot.BUILD.bazel",
+])
+
+# Base sysroot: the deb-derived tree + Bootlin glibc, merged into one CMAKE_SYSROOT
+# tree. This is what libdash cross-builds against. The full sysroot for AAMP adds
+# the built ethanlog / jsc / libdash overlays (see :aamp_sysroot).
+assemble_sysroot(
+    name = "base_sysroot",
+    deb_sysroot = "@xione_sysroot//:sysroot",
+    glibc = "@xione_bootlin_toolchain//:glibc",
+    # Cross-only: keep it out of a host `bazel build //...` (which lacks `ar` and
+    # the cross toolchain). Bazel skips incompatible targets in wildcards, so the
+    # @xione_sysroot deb fetch is never triggered on the host — same guard the
+    # //:aamp and //third_party/libdash cross-builds use.
+    target_compatible_with = ["//bazel/constraints:xione-stb"],
+)
+
+# Full AAMP sysroot: base_sysroot plus the Bazel-built device-library stand-ins
+# that AAMP links against — libethanlog (FindEthanLog), the WPE/JSC C-API stub
+# (jsbindings), and cross-built libdash. This is XIONE_SYSROOT for the AAMP
+# cmake() build; nothing in the tree comes off a device.
+#
+# Layout notes:
+#   - ethanlog / libdash .so's land in the multiarch libdir that
+#     cmake/xione-armhf.cmake already adds to every link via -L.
+#   - libdash's headers go to usr/include/libdash so `#include "libdash/IMPD.h"`
+#     resolves through the default sysroot include path.
+#   - The JSC bundle is staged as a self-contained subtree (pc + include + lib):
+#     wpe-webkit-1.1.pc resolves its includedir/libdir relative to ${pcfiledir},
+#     so its headers and stub .so must sit beside it. The build adds this dir to
+#     PKG_CONFIG_PATH; the -lWPEWebKit-1.1 in the .pc's Libs needs the unversioned
+#     libWPEWebKit-1.1.so → .so.0 symlink.
+assemble_sysroot(
+    name = "aamp_sysroot",
+    deb_sysroot = "@xione_sysroot//:sysroot",
+    glibc = "@xione_bootlin_toolchain//:glibc",
+    overlay_files = {
+        "//third_party/ethanlog:libethanlog.so.3": "usr/lib/arm-linux-gnueabihf/libethanlog.so.3",
+        "@ethanlog_src//:include/ethanlog.h": "usr/include/ethanlog.h",
+        "//third_party/libdash:libdash": "usr/lib/arm-linux-gnueabihf/libdash.so",
+        # AAMP links -lWPEWebKit-1.1; the .pc's -L${libdir} (→ wpe/lib) does not
+        # survive to the link line, so the stub must resolve via the multiarch -L
+        # the toolchain always adds. The .pc's include/ (Cflags -I) is what the
+        # jsbindings compiles consume and lives under wpe/ (below).
+        "//third_party/jsc:libWPEWebKit-1.1.so.0": "usr/lib/arm-linux-gnueabihf/libWPEWebKit-1.1.so.0",
+        "//third_party/jsc:wpe-webkit-1.1.pc": "usr/lib/arm-linux-gnueabihf/wpe/wpe-webkit-1.1.pc",
+    },
+    # libdash's source/ headers (xml/, helpers/) are rooted at .../libdash/source,
+    # not .../include; stage them into the same usr/include/libdash tree.
+    overlay_tree_markers = {
+        "@libdash//:source_headers": "source",
+    },
+    overlay_trees = {
+        "//third_party/jsc:jsc_header_files": "usr/lib/arm-linux-gnueabihf/wpe/include",
+        "@libdash//:public_headers": "usr/include/libdash",
+        "@libdash//:source_headers": "usr/include/libdash",
+    },
+    symlinks = {
+        # Unversioned aliases so the linker's -l<name> resolves against the
+        # versioned sonames the device actually ships.
+        "usr/lib/arm-linux-gnueabihf/libWPEWebKit-1.1.so": "libWPEWebKit-1.1.so.0",
+        "usr/lib/arm-linux-gnueabihf/libethanlog.so": "libethanlog.so.3",
+    },
+    # Cross-only: see :base_sysroot. Keeps the deb fetch out of host wildcards.
+    target_compatible_with = ["//bazel/constraints:xione-stb"],
+)

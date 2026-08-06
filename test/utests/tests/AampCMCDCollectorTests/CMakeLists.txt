@@ -27,10 +27,11 @@ set(EXEC_NAME AampCMCDCollectorTests)
 include(${CMAKE_CURRENT_LIST_DIR}/../CommonTestIncludes.cmake)
 
 set(TEST_SOURCES AampCMCDCollectorTests.cpp
-	         AampCMCDCollectorAampTests.cpp)
+	         AampCMCDCollectorTestCases.cpp)
 
 
-set(AAMP_SOURCES ${AAMP_ROOT}/AampCMCDCollector.cpp)
+set(AAMP_SOURCES ${AAMP_ROOT}/AampCMCDCollector.cpp
+	         ${AAMP_ROOT}/AampCMCDSerializer.cpp)
 
 add_executable(${EXEC_NAME}
                ${TEST_SOURCES}

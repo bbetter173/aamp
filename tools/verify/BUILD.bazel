@@ -1,0 +1,38 @@
+# Artifact assertions for the XiOne cross-build, as a Bazel target rather than as CI
+# shell. They used to live in xione-ci.yml, which meant Bazel could not cache them,
+# they re-ran on every CI run whether or not the libraries changed, and — the part
+# that actually cost time — you could not run them locally without reading the
+# workflow to find out what CI enforces.
+#
+# A genrule rather than a test, deliberately. A test would have to run on an
+# execution platform matching its target platform, and the target platform here is
+# an armv7 set-top box: `bazel test --platforms=//bazel/platforms:xione` fails
+# toolchain resolution with "No matching toolchains found for
+# @bazel_tools//tools/test:default_test_toolchain_type". The alternatives are
+# registering a fake exec platform or transitioning the libraries into a host-side
+# test; both add machinery to reach the same place. As a genrule the check runs in
+# the same configuration as the thing it checks, caches on the libraries' hashes, and
+# fails the build with the assertion's own message.
+#
+# target_compatible_with keeps it out of host wildcards, like every other cross
+# target here.
+
+filegroup(
+    name = "xione_libs_check",
+    srcs = ["xione_libs_check.sh"],
+)
+
+genrule(
+    name = "xione_libs_ok",
+    srcs = [
+        "//:aamp",
+        "@xione_bootlin_toolchain//:readelf",
+    ],
+    outs = ["xione_libs.ok"],
+    # The expected count is passed in rather than hardcoded in the script: keep it in
+    # sync with out_shared_libs in //BUILD.bazel, so a dropped library is a build-file
+    # disagreement instead of a silent pass.
+    cmd = "$(execpath :xione_libs_check) $(execpath @xione_bootlin_toolchain//:readelf) 9 $(execpaths //:aamp) > $@",
+    target_compatible_with = ["//bazel/constraints:xione-stb"],
+    tools = [":xione_libs_check"],
+)

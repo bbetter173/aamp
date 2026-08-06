@@ -1,0 +1,4 @@
+# The vendored RDK libdash patches are referenced as labels from //MODULE.bazel
+# (the @libdash http_archive applies them at fetch time), which requires them to
+# live in a package and be exported.
+exports_files(glob(["*.patch"]))

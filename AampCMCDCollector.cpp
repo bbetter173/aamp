@@ -23,9 +23,88 @@
  */
 
 #include "AampCMCDCollector.h"
-#include "StreamAbstractionAAMP.h"
+#include "AampCMCDSerializer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <uuid/uuid.h>
 
+namespace
+{
+	// Comcast vendor-specific CMCD keys, carried alongside the standard keys in
+	// reverse-DNS custom-key form. Existing collectors consume these; keep emitting them.
+	const std::string kKeyComcastDns{"com.comcast-dns"};
+	const std::string kKeyComcastFirstByte{"com.comcast-fb"};
+	const std::string kKeyComcastLastByte{"com.comcast-lb"};
+
+	/**
+	 * @brief Map the session MediaFormat to the CMCD sf token.
+	 * @return "d" (DASH), "h" (HLS), "s" (Smooth); empty string omits the key.
+	 */
+	std::string MediaFormatToSf(MediaFormat fmt)
+	{
+		switch (fmt)
+		{
+			case eMEDIAFORMAT_DASH:
+				return "d";
+			case eMEDIAFORMAT_HLS:
+			case eMEDIAFORMAT_HLS_MP4:
+				return "h";
+			case eMEDIAFORMAT_SMOOTHSTREAMINGMEDIA:
+				return "s";
+			default:
+				return "";
+		}
+	}
+
+	/**
+	 * @brief Format a playback rate as a CMCD decimal token ("2", "0.5", "-2").
+	 */
+	std::string FormatPlaybackRate(float rate)
+	{
+		char buf[32];
+		std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(rate));
+		return std::string(buf);
+	}
+
+	/**
+	 * @brief Express nextUrl as a URI reference relative to currentUrl, for the CMCD nor key.
+	 *
+	 * CTA-5004 defines nor as a path relative to the current request. Same
+	 * directory yields the trailing segment name; the same origin yields an
+	 * absolute-path reference (a valid relative reference per RFC 3986). A
+	 * different origin (or an unparseable URL) cannot be expressed relative to
+	 * the current request, so an empty string is returned and the key omitted.
+	 * Values originate from URLs and are therefore already URL-encoded.
+	 */
+	std::string RelativizeUrl(const std::string &nextUrl, const std::string &currentUrl)
+	{
+		auto pathStart = [](const std::string &url) -> size_t {
+			size_t schemeEnd = url.find("://");
+			return (schemeEnd == std::string::npos) ? std::string::npos : url.find('/', schemeEnd + 3);
+		};
+		const size_t currentPath = pathStart(currentUrl);
+		const size_t nextPath = pathStart(nextUrl);
+		if (currentPath == std::string::npos || nextPath == std::string::npos)
+		{
+			return "";
+		}
+		if (currentPath != nextPath || currentUrl.compare(0, currentPath, nextUrl, 0, nextPath) != 0)
+		{
+			return ""; // different scheme/authority - not expressible as a relative reference
+		}
+		// Directory of the current request: up to the last '/' of the path proper
+		// (query/fragment excluded so a '/' inside them is not mistaken for the path).
+		const size_t queryPos = currentUrl.find_first_of("?#", currentPath);
+		const size_t dirEnd = currentUrl.rfind('/', (queryPos == std::string::npos) ? std::string::npos : queryPos);
+		if (nextUrl.compare(0, dirEnd + 1, currentUrl, 0, dirEnd + 1) == 0)
+		{
+			return nextUrl.substr(dirEnd + 1); // same directory: segment name (plus any query)
+		}
+		return nextUrl.substr(nextPath); // same origin: absolute-path reference
+	}
+}
 
 /**
  * @brief AampCMCDCollector - Constructor
@@ -43,15 +122,7 @@ AampCMCDCollector::AampCMCDCollector() : bCMCDEnabled(false),mTraceId(""),
  */
 AampCMCDCollector::~AampCMCDCollector()
 {
-	// Free the memory if allocated
-	if(mCMCDStreamData.size())
-	{
-		for(StreamTypeCMCDIter it=mCMCDStreamData.begin() ; it!=mCMCDStreamData.end() ; it++)
-		{
-			SAFE_DELETE(it->second);
-		}
-		mCMCDStreamData.clear();
-	}
+
 }
 
 /**
@@ -75,78 +146,19 @@ void AampCMCDCollector::Initialize(bool enableDisable , std::string &traceId)
 		}
 		mTraceId = traceId;
 		AAMPLOG_MIL("CMCD Enabled. TraceId:%s", mTraceId.c_str());
-		// Create metric handlers for each stream type
-		// Add it to table
-		CMCDHeaders *pCMCDMetrics = NULL;
-		// for Manifest
-		pCMCDMetrics = new ManifestCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("MANIFEST");
-		delete mCMCDStreamData[eMEDIATYPE_MANIFEST];
-		mCMCDStreamData[eMEDIATYPE_MANIFEST] = pCMCDMetrics;
-		// for Video
-		pCMCDMetrics = new VideoCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("VIDEO");
-		delete mCMCDStreamData[eMEDIATYPE_VIDEO];
-		mCMCDStreamData[eMEDIATYPE_VIDEO] = pCMCDMetrics;
-		// for Video Init
-		pCMCDMetrics = new VideoCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("INIT_VIDEO");
-		delete mCMCDStreamData[eMEDIATYPE_INIT_VIDEO];
-		mCMCDStreamData[eMEDIATYPE_INIT_VIDEO] = pCMCDMetrics;
-		// for Video Iframe
-		pCMCDMetrics = new VideoCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("VIDEO");
-		delete mCMCDStreamData[eMEDIATYPE_IFRAME];
-		mCMCDStreamData[eMEDIATYPE_IFRAME] = pCMCDMetrics;
-		// for Audio
-		pCMCDMetrics = new AudioCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("AUDIO");
-		delete mCMCDStreamData[eMEDIATYPE_AUDIO];
-		mCMCDStreamData[eMEDIATYPE_AUDIO] = pCMCDMetrics;
-		// for Audio Init
-		pCMCDMetrics = new AudioCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("INIT_AUDIO");
-		delete mCMCDStreamData[eMEDIATYPE_INIT_AUDIO];
-		mCMCDStreamData[eMEDIATYPE_INIT_AUDIO] = pCMCDMetrics;
-		// for Subtitle
-		pCMCDMetrics = new SubtitleCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("SUBTITLE");
-		delete mCMCDStreamData[eMEDIATYPE_SUBTITLE];
-		mCMCDStreamData[eMEDIATYPE_SUBTITLE] = pCMCDMetrics;
-		// for Subtitle Init
-		pCMCDMetrics = new SubtitleCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("SUBTITLE");
-		delete mCMCDStreamData[eMEDIATYPE_INIT_SUBTITLE];
-		mCMCDStreamData[eMEDIATYPE_INIT_SUBTITLE] = pCMCDMetrics;
-
-		// for Video Playlist
-		pCMCDMetrics = new ManifestCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("PLAYLIST_VIDEO");
-		delete mCMCDStreamData[eMEDIATYPE_PLAYLIST_VIDEO];
-		mCMCDStreamData[eMEDIATYPE_PLAYLIST_VIDEO] = pCMCDMetrics;
-
-		// for Audio Playlist
-		pCMCDMetrics = new ManifestCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("PLAYLIST_AUDIO");
-		delete mCMCDStreamData[eMEDIATYPE_PLAYLIST_AUDIO];
-		mCMCDStreamData[eMEDIATYPE_PLAYLIST_AUDIO] = pCMCDMetrics;
-
-		// for Subtitle Playlist
-		pCMCDMetrics = new ManifestCMCDHeaders();
-		pCMCDMetrics->SetSessionId(mTraceId);
-		pCMCDMetrics->SetMediaType("PLAYLIST_SUBTITLE");
-		delete mCMCDStreamData[eMEDIATYPE_PLAYLIST_SUBTITLE];
-		mCMCDStreamData[eMEDIATYPE_PLAYLIST_SUBTITLE] = pCMCDMetrics;
+		// Reset per-media-type reporting state. Labels mirror the media type names
+		// the legacy CMCDHeaders subclasses were configured with.
+		mCMCDStreamData[eMEDIATYPE_MANIFEST] = CMCDState{StreamCategory::eMANIFEST, "MANIFEST"};
+		mCMCDStreamData[eMEDIATYPE_VIDEO] = CMCDState{StreamCategory::eVIDEO, "VIDEO"};
+		mCMCDStreamData[eMEDIATYPE_INIT_VIDEO] = CMCDState{StreamCategory::eVIDEO, "INIT_VIDEO"};
+		mCMCDStreamData[eMEDIATYPE_IFRAME] = CMCDState{StreamCategory::eVIDEO, "VIDEO"};
+		mCMCDStreamData[eMEDIATYPE_AUDIO] = CMCDState{StreamCategory::eAUDIO, "AUDIO"};
+		mCMCDStreamData[eMEDIATYPE_INIT_AUDIO] = CMCDState{StreamCategory::eAUDIO, "INIT_AUDIO"};
+		mCMCDStreamData[eMEDIATYPE_SUBTITLE] = CMCDState{StreamCategory::eSUBTITLE, "SUBTITLE"};
+		mCMCDStreamData[eMEDIATYPE_INIT_SUBTITLE] = CMCDState{StreamCategory::eSUBTITLE, "SUBTITLE"};
+		mCMCDStreamData[eMEDIATYPE_PLAYLIST_VIDEO] = CMCDState{StreamCategory::eMANIFEST, "PLAYLIST_VIDEO"};
+		mCMCDStreamData[eMEDIATYPE_PLAYLIST_AUDIO] = CMCDState{StreamCategory::eMANIFEST, "PLAYLIST_AUDIO"};
+		mCMCDStreamData[eMEDIATYPE_PLAYLIST_SUBTITLE] = CMCDState{StreamCategory::eMANIFEST, "PLAYLIST_SUBTITLE"};
 	}
 }
 
@@ -165,68 +177,215 @@ void AampCMCDCollector::CMCDSetNextObjectRequest(std::string url,BitsPerSecond C
 		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaT);
 		if(it != mCMCDStreamData.end())
 		{
-			CMCDHeaders *pCMCDMetrics = it->second;
-			pCMCDMetrics->SetBitrate((int)(CMCDBandwidth/1000));
-			pCMCDMetrics->SetNextUrl(url);
+			CMCDState &state = it->second;
+			state.bitrate = (int)(CMCDBandwidth/1000);
+			state.nextUrl = std::move(url);
 		}
 	}
 }
 
-
 /**
- * @brief convertHexa to convert decimal to hexadecimal
+ * @brief Build the CMCD entries for one media type's current state.
  *
- * @return hexadecimal
+ * Emits the CTA-5004 v1 key set this collector can source: the Session group
+ * (sid, v, sf, st, pr, cid) for every media type, the object type token, and
+ * — for media segment types — the segment metrics (br/tb/d, bl/dl/mtp/su,
+ * bs/rtp, nor/nrr plus the vendor keys). Unavailable keys are omitted per the
+ * CTA-5004 optional-key rule. Consumes the bs latch.
  */
-std::string AampCMCDCollector::convertHexa(long long number)
+std::vector<AampCMCD::Entry> AampCMCDCollector::BuildEntries(CMCDState &state, const std::string &currentUrl) const
 {
-	std::string hexa;
-	// loop till number>0
-	while (number)
+	using AampCMCD::Entry;
+	using AampCMCD::HeaderGroup;
+	using AampCMCD::RoundToNearest100;
+	using AampCMCD::ValueKind;
+
+	std::vector<Entry> entries;
+
+	// --- CMCD-Session group (all media types) ---
+
+	// sid - String type, always present
+	entries.push_back(Entry{"sid", mTraceId, HeaderGroup::eSESSION, ValueKind::eQUOTED});
+	// v - omitted: CTA-5004 says the version SHOULD only be sent when not equal
+	// to 1, and this implementation is CMCD v1.
+	// sf - omit until the streaming format is known
+	if(!state.streamingFormat.empty())
 	{
-		int rem = number % 16;
-		// when rem is less than 10 then store 0-9
-		// else store A - F
-		if (rem < 10)
-		   hexa.push_back(rem + '0');
-		else
-		   hexa.push_back(rem - 10 + 'A');
-		number = number / 16;
+		entries.push_back(Entry{"sf", state.streamingFormat, HeaderGroup::eSESSION, ValueKind::ePLAIN});
 	}
-	std::reverse(hexa.begin(), hexa.end());
-	return hexa;
+	// st - omit before the first manifest parse
+	if(!state.streamType.empty())
+	{
+		entries.push_back(Entry{"st", state.streamType, HeaderGroup::eSESSION, ValueKind::ePLAIN});
+	}
+	// pr - CTA-5004: sent whenever the rate is not 1. 0 is valid ("not playing") and
+	// must be emitted; only 1x is omitted. Epsilon compare rather than float equality.
+	static constexpr float kNormalPlayRate = 1.0f;
+	static constexpr float kPlayRateEps = 1e-4f;
+	if(std::fabs(state.playbackRate - kNormalPlayRate) > kPlayRateEps)
+	{
+		entries.push_back(Entry{"pr", FormatPlaybackRate(state.playbackRate), HeaderGroup::eSESSION, ValueKind::ePLAIN});
+	}
+	// cid - String type; omit when no content id is available
+	if(!state.contentId.empty())
+	{
+		entries.push_back(Entry{"cid", state.contentId, HeaderGroup::eSESSION, ValueKind::eQUOTED});
+	}
+
+	// --- CMCD-Object: ot token ---
+	switch(state.category)
+{
+		case StreamCategory::eMANIFEST:
+			entries.push_back(Entry{"ot", "m", HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+			break;
+		case StreamCategory::eSUBTITLE:
+			// "c" = caption/subtitle per CTA-5004 (the legacy "s" is not a defined token)
+			entries.push_back(Entry{"ot", "c", HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+			break;
+		case StreamCategory::eVIDEO:
+		case StreamCategory::eAUDIO:
+	{
+			std::string objectType;
+			if(state.category == StreamCategory::eVIDEO)
+			{
+				if(state.mediaTypeLabel == "INIT_VIDEO")
+				{
+					objectType = "i";
+				}
+				else if(state.mediaTypeLabel == "MUXED")
+				{
+					objectType = "av";
+				}
+		else
+				{
+					objectType = "v";
+	}
 }
+			else
+			{
+				objectType = (state.mediaTypeLabel == "INIT_AUDIO") ? "i" : "a";
+			}
+			entries.push_back(Entry{"ot", objectType, HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+
+			// --- Segment metrics (media segment types only) ---
+
+			// br and tb - plain integer kbps. CTA-5004 defines no rounding for these keys;
+			// 0 means unknown and is omitted.
+			if(state.bitrate > 0)
+			{
+			entries.push_back(Entry{"br", std::to_string(state.bitrate), HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+			}
+			if(state.topBitrate > 0)
+			{
+			entries.push_back(Entry{"tb", std::to_string(state.topBitrate), HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+			}
+			// d - object duration, plain integer ms (no rounding clause)
+			if(state.fragmentDuration > 0)
+			{
+				entries.push_back(Entry{"d", std::to_string(state.fragmentDuration), HeaderGroup::eOBJECT, ValueKind::ePLAIN});
+			}
+			// bl - buffer length in ms, rounded to the nearest 100 ms; omit when unavailable
+			const int blRounded = RoundToNearest100(state.bufferLength);
+			if(blRounded > 0)
+			{
+				entries.push_back(Entry{"bl", std::to_string(blRounded), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+			}
+			// dl - deadline in ms = buffered duration / |playback rate|, rounded to 100 ms.
+			// When not playing (pr=0) the buffer is not draining, so no deadline exists and
+			// the key is omitted. Trick/slow rates scale the drain: 0.25x -> dl = 4*bl.
+			static constexpr float kNotPlayingEps = 1e-4f;
+			if(state.bufferLength > 0 && std::fabs(state.playbackRate) > kNotPlayingEps)
+			{
+				const int dlMs = static_cast<int>(static_cast<float>(state.bufferLength) / std::fabs(state.playbackRate));
+				const int dlRounded = RoundToNearest100(dlMs);
+				if(dlRounded > 0)
+				{
+					entries.push_back(Entry{"dl", std::to_string(dlRounded), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+				}
+			}
+			// mtp - measured throughput in kbps, rounded to the nearest 100 kbps
+			const int mtpRounded = RoundToNearest100(state.measuredThroughput);
+			if(mtpRounded > 0)
+			{
+				entries.push_back(Entry{"mtp", std::to_string(mtpRounded), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+			}
+			// su - startup-urgent bare token
+			if(state.startupUrgent)
+			{
+				entries.push_back(Entry{"su", "1", HeaderGroup::eREQUEST, ValueKind::eBOOLEAN});
+			}
+			// bs - reported once when a starvation has been latched since the last request,
+			// then cleared (CTA-5004: bs marks starvation at some point since the prior request)
+			if(state.bufferStarvation)
+			{
+				entries.push_back(Entry{"bs", "1", HeaderGroup::eSTATUS, ValueKind::eBOOLEAN});
+				state.bufferStarvation = false;
+			}
+			// rtp - requested max throughput = 2 x encoded bitrate, rounded to 100 kbps.
+			// Factor of 2 per the CTA-5004 client-discretion clause; matches the ExoPlayer
+			// community default.
+			if(state.bitrate > 0)
+			{
+				const int rtpRounded = RoundToNearest100(state.bitrate * 2);
+				if(rtpRounded > 0)
+				{
+					entries.push_back(Entry{"rtp", std::to_string(rtpRounded), HeaderGroup::eSTATUS, ValueKind::ePLAIN});
+				}
+			}
+			// nor / nrr - String type keys. nor is the next object expressed relative
+			// to the current request (see RelativizeUrl); it is omitted when the next
+			// URL is unknown or not relativizable. The selection precedence (dns path
+			// uses nor; otherwise nrr wins over nor) matches the legacy code.
+			if(state.dnsLookUpTime > 0 || state.nextRange.empty())
+			{
+				if(!state.nextUrl.empty())
+				{
+					const std::string relativeNext = RelativizeUrl(state.nextUrl, currentUrl);
+					if(!relativeNext.empty())
+					{
+						entries.push_back(Entry{"nor", relativeNext, HeaderGroup::eREQUEST, ValueKind::eQUOTED});
+					}
+				}
+			}
+			else
+			{
+				entries.push_back(Entry{"nrr", state.nextRange, HeaderGroup::eREQUEST, ValueKind::eQUOTED});
+			}
+			// Vendor keys - presence rules are deliberately unchanged from the deployed
+			// behaviour, because downstream consumers may assume they always exist:
+			// fb/lb are emitted on every media segment request (even when 0), dns only
+			// when a lookup time is available. Values stay plain unrounded integers -
+			// they are outside the CTA-5004 kbps/ms rounding scope.
+			if(state.dnsLookUpTime > 0)
+			{
+				entries.push_back(Entry{kKeyComcastDns, std::to_string(state.dnsLookUpTime), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+			}
+			entries.push_back(Entry{kKeyComcastFirstByte, std::to_string(state.firstByte), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+			entries.push_back(Entry{kKeyComcastLastByte, std::to_string(state.lastByte), HeaderGroup::eREQUEST, ValueKind::ePLAIN});
+			break;
+		}
+	}
+	return entries;
+}
+
 /**
  * @brief CMCDGetHeaders Get the CMCD headers to add in download request
  *
  * @return None
  */
-void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader)
+void AampCMCDCollector::CMCDGetHeaders(AampMediaType mediaType , std::vector<std::string> &customHeader, const std::string &currentUrl)
 {
 	std::lock_guard<std::mutex> lock (myMutex);
 	if(bCMCDEnabled)
 	{
-		// To find the execution time of CMCD Header packing during download operation
-		std::unordered_map<std::string, std::vector<std::string>> CMCDCustomHeaders;
 		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
-		CMCDHeaders *pCMCDMetrics=NULL;
-		if(it != mCMCDStreamData.end())
-		{
-			pCMCDMetrics = it->second;
-			pCMCDMetrics->BuildCMCDCustomHeaders(CMCDCustomHeaders);
-		}
-		else
+		if(it == mCMCDStreamData.end())
 		{
 			AAMPLOG_INFO("[CMCD][%d]Couldn't find the filetype to Get metrics",mediaType);
 			return;
 		}
-		std::string headerValue;
-		for (std::unordered_map<std::string, std::vector<std::string>>::iterator it = CMCDCustomHeaders.begin();it != CMCDCustomHeaders.end(); it++)
+		for(const std::string &headerValue : AampCMCD::SerializeHeaders(BuildEntries(it->second, currentUrl)))
 		{
-			headerValue.clear();
-			headerValue.append(it->first);
-			headerValue.append(" ");
-			headerValue.append(it->second.at(0));
 			customHeader.push_back(headerValue);
 			AAMPLOG_TRACE("[CMCD][%d]Header :%s",mediaType,headerValue.c_str());
 		}
@@ -247,8 +406,10 @@ void AampCMCDCollector::CMCDSetNetworkMetrics(AampMediaType mediaType,  int star
 		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
 		if(it != mCMCDStreamData.end())
 		{
-			CMCDHeaders *pCMCDMetrics = it->second;
-			pCMCDMetrics->SetNetworkMetrics(startTransferTime,totalTime,dnsLookUpTime);
+			CMCDState &state = it->second;
+			state.firstByte = startTransferTime;
+			state.lastByte = totalTime;
+			state.dnsLookUpTime = dnsLookUpTime;
 		}
 		else
 		{
@@ -268,12 +429,11 @@ void AampCMCDCollector::SetBitrates(AampMediaType mediaType,const std::vector<Bi
 		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
 		if(it != mCMCDStreamData.end())
 		{
-			CMCDHeaders *pCMCDMetrics = it->second;
 			BitsPerSecond maxBitrate = *max_element(bitrateList.begin(), bitrateList.end());
 			AAMPLOG_INFO("[CMCD][%d]Top Bitrate %" BITSPERSECOND_FORMAT, mediaType,maxBitrate);
 			if(mediaType == eMEDIATYPE_VIDEO || mediaType == eMEDIATYPE_AUDIO)
 			{
-				pCMCDMetrics->SetTopBitrate( (int)(maxBitrate/1000) );
+				it->second.topBitrate = (int)(maxBitrate/1000);
 			}
 		}
 		else
@@ -298,21 +458,30 @@ void AampCMCDCollector::SetTrackData(AampMediaType mediaType,bool bufferRedStatu
 		{
 			return;
 		}
-		CMCDHeaders *pCMCDMetrics = it->second;
+		CMCDState &state = it->second;
 		if(mediaType == eMEDIATYPE_VIDEO || mediaType == eMEDIATYPE_INIT_VIDEO)
 		{
 			if(IsMuxed)
 			{
-				pCMCDMetrics->SetMediaType("MUXED");
+				// One-way latch, matching legacy SetMediaType("MUXED") behaviour
+				state.mediaTypeLabel = "MUXED";
 			}
-			pCMCDMetrics->SetBufferStarvation(bufferRedStatus);
-			pCMCDMetrics->SetBitrate(currentBitrate);
-			pCMCDMetrics->SetBufferLength(bufferedDuration);
+			// bs latch: a starvation is sticky until reported (BuildEntries clears it),
+			// so one seen between two requests is still reported on the resumption request
+			if(bufferRedStatus)
+			{
+				state.bufferStarvation = true;
+			}
+			state.bitrate = currentBitrate;
+			state.bufferLength = bufferedDuration;
 		}
 		else if(mediaType == eMEDIATYPE_AUDIO || mediaType == eMEDIATYPE_INIT_AUDIO)
 		{
-			pCMCDMetrics->SetBufferStarvation(bufferRedStatus);
-			pCMCDMetrics->SetBufferLength(bufferedDuration);
+			if(bufferRedStatus)
+			{
+				state.bufferStarvation = true;
+			}
+			state.bufferLength = bufferedDuration;
 		}
 	}
 }
@@ -330,11 +499,124 @@ void AampCMCDCollector::CMCDSetNextRangeRequest(std::string nextrange,BitsPerSec
 		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
 		if(it != mCMCDStreamData.end())
 		{
-			CMCDHeaders *pCMCDMetrics = it->second;
-			std::string CMCDNextRangeRequest;
-			CMCDNextRangeRequest = std::move(nextrange);
-			pCMCDMetrics->SetBitrate((int)(bandwidth/1000));
-			pCMCDMetrics->SetNextRange(CMCDNextRangeRequest);
+			CMCDState &state = it->second;
+			state.bitrate = (int)(bandwidth/1000);
+			state.nextRange = std::move(nextrange);
+		}
+	}
+}
+
+/**
+ * @brief CMCDSetSessionParams Push streaming format (sf) and content ID (cid) to all media types
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetSessionParams(MediaFormat mediaFormat, const std::string& rawUrl)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		// Strip query string and fragment from cid (auth-token leakage prevention):
+		// take the substring up to the first '?' or '#', whichever comes first.
+		const auto stripPos = std::min(rawUrl.find('?'), rawUrl.find('#'));
+		const std::string contentId = (stripPos != std::string::npos) ? rawUrl.substr(0, stripPos) : rawUrl;
+		const std::string sf = MediaFormatToSf(mediaFormat);
+		for(auto &kv : mCMCDStreamData)
+		{
+			kv.second.streamingFormat = sf;
+			kv.second.contentId = contentId;
+		}
+		AAMPLOG_INFO("[CMCD] CMCDSetSessionParams sf=%s cid=%s", sf.c_str(), contentId.c_str());
+	}
+}
+
+/**
+ * @brief CMCDSetLiveStatus Push live/VOD stream type (st) to all media types
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetLiveStatus(bool isLive)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		const std::string st = isLive ? "l" : "v";
+		for(auto &kv : mCMCDStreamData)
+		{
+			kv.second.streamType = st;
+		}
+		AAMPLOG_INFO("[CMCD] CMCDSetLiveStatus st=%s", st.c_str());
+	}
+}
+
+/**
+ * @brief CMCDSetPlaybackRate Push the current playback rate (pr) to all media types
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetPlaybackRate(float rate)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		for(auto &kv : mCMCDStreamData)
+		{
+			kv.second.playbackRate = rate;
+		}
+		AAMPLOG_TRACE("[CMCD] CMCDSetPlaybackRate rate=%g", static_cast<double>(rate));
+	}
+}
+
+/**
+ * @brief CMCDSetFragmentDuration Set the object duration (d) in ms for one media type
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetFragmentDuration(AampMediaType mediaType, int durationMs)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
+		if(it != mCMCDStreamData.end())
+		{
+			it->second.fragmentDuration = durationMs;
+		}
+	}
+}
+
+/**
+ * @brief CMCDSetMeasuredThroughput Set the measured throughput (mtp) in kbps for one media type
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetMeasuredThroughput(AampMediaType mediaType, int kbps)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
+		if(it != mCMCDStreamData.end())
+		{
+			it->second.measuredThroughput = kbps;
+		}
+	}
+}
+
+/**
+ * @brief CMCDSetStartupUrgent Set the startup-urgent flag (su) for one media type
+ *
+ * @return None
+ */
+void AampCMCDCollector::CMCDSetStartupUrgent(AampMediaType mediaType, bool startupUrgent)
+{
+	std::lock_guard<std::mutex> lock (myMutex);
+	if(bCMCDEnabled)
+	{
+		StreamTypeCMCDIter it=mCMCDStreamData.find(mediaType);
+		if(it != mCMCDStreamData.end())
+		{
+			it->second.startupUrgent = startupUrgent;
 		}
 	}
 }

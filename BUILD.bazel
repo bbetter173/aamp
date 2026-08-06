@@ -1,0 +1,185 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+# AAMP cross-build for the Sky XiOne, via rules_foreign_cc driving this repo's
+# own CMake build (cmake/xione-armhf.cmake). Do NOT rewrite in native cc_* rules
+# — the CMake build is the interface RDK maintains, and re-expressing it in Bazel
+# would diverge and rot on every upstream merge. See XIONE-BUILD.md.
+#
+# The cache_entries / env below mirror scripts/build-xione.sh on
+# feat/xione-build-tooling: that script drives the same cmake configure inside a
+# container, so the flag surface is shared and any change here should be mirrored
+# there (and vice versa).
+#
+# Not tagged "manual": target_compatible_with below already keeps it out of a
+# host `bazel build //...` (Bazel skips incompatible targets in wildcards rather
+# than building them), so the heavy cross-build only runs when the XiOne platform
+# is explicitly selected — e.g. `--platforms=//bazel/platforms:xione`.
+
+# The AAMP source tree, which is this repo's root. glob() does not cross package
+# boundaries, so everything under bazel/ and third_party/ (each its own package)
+# is excluded automatically; the exclusions below are for the Bazel workspace
+# files that sit in this package alongside the sources. Bazel's convenience
+# symlinks are kept out via .bazelignore.
+filegroup(
+    name = "all_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "BUILD.bazel",
+            "MODULE.bazel",
+            "MODULE.bazel.lock",
+            ".bazelignore",
+            ".bazelrc",
+            ".bazelversion",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# The cross-toolchain file needs to be addressable on its own (as a cmake()
+# `data` dep and CMAKE_TOOLCHAIN_FILE path) as well as part of :all_srcs.
+exports_files(["cmake/xione-armhf.cmake"])
+
+cmake(
+    name = "aamp",
+    build_args = [
+        "-j",
+    ],
+    cache_entries = {
+        # This repo's cross-toolchain file. It reads the compiler and sysroot
+        # from XIONE_TOOLCHAIN_DIR / XIONE_SYSROOT, and force-appends the
+        # multiarch -L that rules_foreign_cc's pre-set linker cache vars would
+        # otherwise suppress (see the comment on that block in the file).
+        "CMAKE_TOOLCHAIN_FILE": "$$EXT_BUILD_ROOT/$(execpath //:cmake/xione-armhf.cmake)",
+        # Point at the staged data deps by execroot path, the pattern proven by
+        # //third_party/libdash. XIONE_SYSROOT is the merged aamp_sysroot tree
+        # (deb tree + glibc + ethanlog + jsc + libdash).
+        #
+        # XIONE_TOOLCHAIN_DIR is derived from a file inside the toolchain rather
+        # than spelled out: the literal `external/+http_archive+<name>` is Bazel's
+        # internal canonical-repo-name form, which has already changed once
+        # (`~http_archive~name`). Hardcoding it means a Bazel upgrade, or moving
+        # the archive behind a module extension, silently points this at a
+        # nonexistent directory and CMake fails with "CMAKE_C_COMPILER not found"
+        # rather than anything pointing here. `:nm` is a single-file filegroup at
+        # bin/<triple>-nm, so two dirnames give the toolchain root.
+        "XIONE_TOOLCHAIN_DIR": "$$EXT_BUILD_ROOT/$$(dirname $$(dirname $(execpath @xione_bootlin_toolchain//:nm)))",
+        "XIONE_SYSROOT": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)",
+        "CMAKE_MACOSX_RPATH": "FALSE",
+        # Pre-seed the JSC C-API header dir. CMakeLists.txt locates it with
+        #   find_path(JSC_INCDIR JavaScriptCore/JavaScript.h HINTS ${WPE_WEBKIT_INCLUDEDIR} …)
+        # which cannot succeed in this cross build: xione-armhf.cmake sets
+        # CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY, so find_path re-roots its HINTS
+        # under the sysroot — but pkg-config already returned an absolute,
+        # sysroot-prefixed WPE_WEBKIT_INCLUDEDIR (PKG_CONFIG_SYSROOT_DIR), so the
+        # re-rooted path is doubled and nothing is found. find_path() is a no-op
+        # when its result variable is already a non-empty cache entry, so setting
+        # it here bypasses the lookup with the path the .pc would have yielded.
+        #
+        # Without this, JSC_INCDIR stays JSC_INCDIR-NOTFOUND and reaches
+        # include_directories(); CMake then fails the *generate* step on the
+        # relative include dir for aamp-cli and gstTestHarness. Those two are
+        # test binaries we never build (see `targets` below), but generate covers
+        # every target in the project, so the error is fatal regardless.
+        "JSC_INCDIR": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/lib/arm-linux-gnueabihf/wpe/include",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        # Pin the configuration to Release. rules_foreign_cc's cmake() does not
+        # set CMAKE_BUILD_TYPE, so an unset build type would leave the
+        # CMAKE_*_FLAGS_RELEASE below UNAPPLIED — silently dropping both the
+        # -O3 -DNDEBUG and, critically, the -Werror=format* suppressions the
+        # build needs to compile. Pin it here so those flags are guaranteed to
+        # apply regardless of what CMakeLists.txt defaults to.
+        "CMAKE_BUILD_TYPE": "Release",
+        # Reconcile our build flags with the AAMP sources.
+        # CMAKE_*_FLAGS_<CONFIG> is appended after CMAKE_*_FLAGS on every compile,
+        # so flags placed here land after both CMakeLists.txt's own -Werror and
+        # our toolchain hardening, and win:
+        #   -Wno-error=format          CMakeLists.txt's -Werror=format promotes a
+        #                              bug in isobmffprocessor.cpp (abs() over
+        #                              doubles passed to %lf) to a hard error;
+        #   -Wno-error=format-security our toolchain's -Werror=format-security
+        #                              trips on the jsbindings printf use;
+        #   -include cmath (C++ only)  jsbindings.cpp uses std::round without
+        #                              including <cmath> — the real JSC headers
+        #                              pull it in transitively; our C-API stub
+        #                              does not, so force-include it.
+        # The -O3 -DNDEBUG reproduce CMake's default Release flags this replaces.
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -Wno-error=format -Wno-error=format-security -include cmath",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG -Wno-error=format -Wno-error=format-security",
+        # Verbatim from scripts/build-xione.sh:
+        "CMAKE_INBUILT_AAMP_DEPENDENCIES": "ON",
+        "CMAKE_SYSTEMD_JOURNAL": "ON",
+        "CMAKE_USE_ETHAN_LOG": "ON",
+        "CMAKE_TELEMETRY_2_0_REQUIRED": "OFF",
+        "CMAKE_BUILD_KOTLIN_ENABLED": "OFF",
+        # jsbindings needs the WPE/JSC stub (see //third_party/jsc). Flip to OFF
+        # to build libaamp.so alone (matches build-xione.sh's default).
+        "CMAKE_WPEWEBKIT_JSBINDINGS": "ON",
+    },
+    data = [
+        "//:cmake/xione-armhf.cmake",
+        "//third_party/xione_sysroot:aamp_sysroot",
+        "@xione_bootlin_toolchain//:all",
+        # Anchor for the XIONE_TOOLCHAIN_DIR $(execpath) above; already part of
+        # :all, listed so location expansion can resolve it.
+        "@xione_bootlin_toolchain//:nm",
+    ],
+    env = {
+        # pkg-config must resolve the sysroot's .pc files, not the host's —
+        # the same isolation build-xione.sh enforces (PCENV). The wpe dir carries
+        # the WPE/JSC stub .pc (pkg_check_modules(WPE_WEBKIT wpe-webkit-1.1)).
+        "PKG_CONFIG_SYSROOT_DIR": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)",
+        "PKG_CONFIG_LIBDIR": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/lib/arm-linux-gnueabihf/pkgconfig:$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/lib/pkgconfig:$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/share/pkgconfig",
+        "PKG_CONFIG_PATH": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/lib/arm-linux-gnueabihf/wpe",
+        # Bootlin gcc is not multiarch-aware; expose the arm-linux-gnueabihf
+        # header dir so bare <curl/...> etc. resolve (as for libdash). The
+        # matching link -L is force-appended by cmake/xione-armhf.cmake
+        # (LIBRARY_PATH is ignored by the Bootlin wrapper).
+        "CPATH": "$$EXT_BUILD_ROOT/$(execpath //third_party/xione_sysroot:aamp_sysroot)/usr/include/arm-linux-gnueabihf",
+    },
+    # Ninja generator: same reason as libdash — avoids rules_foreign_cc
+    # bootstrapping GNU Make against the host glibc headers.
+    generate_args = ["-GNinja"],
+    # `cmake --install` unconditionally installs aamp-cli and gstTestHarness
+    # (test binaries we don't build), so it aborts before copying the libraries.
+    # Skip install and stage just the two .so's ourselves for out_shared_libs.
+    install = False,
+    lib_source = "//:all_srcs",
+    # The whole set of shared libraries the build emits, not just the two
+    # headline ones. With CMAKE_INBUILT_AAMP_DEPENDENCIES=ON this branch builds
+    # middleware/ and support/ as separate .so's, and libaamp.so carries a
+    # DT_NEEDED on five of them (playergstinterface, playerfbinterface,
+    # playerlogmanager, baseconversion, metrics) — so shipping only libaamp.so +
+    # libaampjsbindings.so yields a library that cannot load on the device. The
+    # device's stock AAMP predates this split and does not provide them.
+    #
+    # Keep this list in sync with the build: a name here that the build stops
+    # emitting fails the action (the postfix_script cp fails), which is the
+    # intended tripwire.
+    out_shared_libs = [
+        "libaamp.so",
+        "libaampjsbindings.so",
+        "libbaseconversion.so",
+        "libmetrics.so",
+        "libplayerfbinterface.so",
+        "libplayergstinterface.so",
+        "libplayerjsonobject.so",
+        "libplayerlogmanager.so",
+        "libsubtec.so",
+    ],
+    # Collect the nine built libraries out of the CMake build tree. Each name must
+    # resolve to exactly one file: `| head -1` would silently pick a
+    # filesystem-order-dependent match if AAMP's CMake ever copied a library
+    # around, making the staged bytes differ between machines for one source
+    # revision, and would pass an empty path to cp on no match ("missing
+    # destination file operand"). Fail with the name and the candidates instead.
+    postfix_script = "mkdir -p $$INSTALLDIR/lib && for so in libaamp.so libaampjsbindings.so libbaseconversion.so libmetrics.so libplayerfbinterface.so libplayergstinterface.so libplayerjsonobject.so libplayerlogmanager.so libsubtec.so; do set -- $$(find $$BUILD_TMPDIR -name $$so -type f); if [ $$# -ne 1 ]; then echo \"postfix_script: expected exactly one $$so in the build tree, found $$#: $$*\" >&2; exit 1; fi; cp \"$$1\" $$INSTALLDIR/lib/; done",
+    # Heavy build; caches as one action unit — expect a full rebuild on any
+    # source change.
+    target_compatible_with = ["//bazel/constraints:xione-stb"],
+    targets = [
+        "aamp",
+        "aampjsbindings",
+    ],
+    visibility = ["//visibility:public"],
+)

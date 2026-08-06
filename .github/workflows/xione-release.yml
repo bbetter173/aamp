@@ -1,0 +1,172 @@
+name: XiOne release
+
+# Publishes the XiOne cross-build as a GitHub Release asset. Downstream repos
+# pin the tarball by URL + sha256 instead of building AAMP themselves.
+#
+# Two modes, both prefixed `xione-` so they never collide with upstream rdkcentral
+# tags in this fork:
+#
+#   xione-build-<shortsha>  a commit build, published as a PRERELEASE. For pinning
+#                           a specific commit downstream before anything is
+#                           blessed as a version. The tag is disposable — delete
+#                           it and the prerelease when the commit is superseded.
+#   xione-v<semver>         a real release. Semver of the *packaging*, not of AAMP:
+#                           the artifact is a function of the AAMP commit AND our
+#                           sysroot/toolchain pins, so no upstream version
+#                           identifies it.
+#
+# Either way manifest.json inside the tarball records the exact inputs, and the
+# consumer pins url + sha256. Promoting a commit build to a release is just
+# tagging that same commit `xione-v<semver>` and repointing the consumer.
+#
+# The tag-push triggers are what make this usable from a feature branch:
+# workflow_dispatch only works once the workflow is on the default branch.
+
+on:
+  push:
+    tags:
+      - "xione-v*"
+      - "xione-build-*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the xione-v prefix (e.g. 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    # GitHub-hosted; see the note in xione-ci.yml on `gke-arc-aamp`.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # stage_artifacts.sh records `git describe` in the manifest.
+          fetch-depth: 0
+
+      - name: Install host build requirements
+        run: |
+          # The ARC runner image runs as root without sudo; GitHub-hosted needs
+          # sudo. Pick whichever exists so the workflow runs on either.
+          SUDO=""
+          command -v sudo >/dev/null 2>&1 && SUDO=sudo
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends binutils pkg-config patchelf
+
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: bazel-xione-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
+          restore-keys: |
+            bazel-xione-
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          prerelease=false
+          case "${{ github.event_name }}" in
+            push)
+              tag="${GITHUB_REF_NAME}"
+              case "$tag" in
+                # xione-build-<shortsha> -> commit build, published as a prerelease
+                xione-build-*) version="${tag#xione-build-}"; prerelease=true ;;
+                # xione-v0.1.0 -> 0.1.0
+                xione-v*)      version="${tag#xione-v}" ;;
+                *) echo "::error::unexpected tag $tag"; exit 1 ;;
+              esac
+              ;;
+            *)
+              version="${{ inputs.version }}"
+              tag="xione-v${version}"
+              ;;
+          esac
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "Publishing $tag (version $version)"
+
+      - name: Build and stage
+        run: |
+          bash tools/release/stage_artifacts.sh \
+            --version "${{ steps.version.outputs.version }}" \
+            --out staging-xione \
+            --keep-debug
+
+      - name: Compose release notes
+        # Written to a file and passed via body_path, NOT inlined into `body`.
+        # A `body:` YAML block scalar is not shell-interpolated, so a $(...) in it
+        # publishes literally — which silently ships release notes whose stated
+        # checksums are absent, while consumers are told to copy hashes from here.
+        run: |
+          set -euo pipefail
+          cd staging-xione
+          sha256sum ./*.tar.gz | sed 's|\./||' >checksums.txt
+          cd ..
+
+          {
+            echo "AAMP cross-built for the Sky XiOne (armv7 NEON hard-float, glibc 2.35)."
+            echo
+            if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+              echo "**Commit build**, not a blessed version — published so a specific commit can be"
+              echo "pinned downstream. Promote it by tagging this same commit \`xione-v<semver>\`."
+              echo
+            fi
+            echo "Built by \`.github/workflows/xione-release.yml\` from"
+            echo "\`bazel build //:aamp --platforms=//bazel/platforms:xione\`."
+            echo "See [XIONE-BUILD.md](XIONE-BUILD.md)."
+            echo
+            echo '## Contents'
+            echo
+            echo "\`aamp-xione-armv7-${{ steps.version.outputs.version }}.tar.gz\` unpacks to"
+            echo '`usr/lib/*.so` plus `manifest.json`, laid out to drop straight into a'
+            echo '`.wgt` widget tree.'
+            echo
+            echo 'All nine libraries are required. `libaamp.so` carries a `DT_NEEDED` on the'
+            echo 'middleware libraries, which the device'"'"'s stock AAMP predates and does not'
+            echo 'provide. Every library is already stripped and has `RPATH=$ORIGIN`, so it'
+            echo 'resolves its siblings inside `/package/usr/lib` rather than falling back to'
+            echo 'the stock `/usr/lib`.'
+            echo
+            tar -tzf "staging-xione/aamp-xione-armv7-${{ steps.version.outputs.version }}.tar.gz" \
+              | sed -n 's|^usr/lib/\(.*\.so\)$|\1|p' | LC_ALL=C sort \
+              | while read -r l; do echo "- \`$l\`"; done
+            echo
+            echo '## Provenance'
+            echo
+            echo 'The tarball is a function of the AAMP commit **and** the pinned sysroot and'
+            echo 'toolchain, so the version above is packaging semver rather than an AAMP'
+            echo 'version. `manifest.json` records the exact inputs:'
+            echo
+            echo '```json'
+            tar -xzOf "staging-xione/aamp-xione-armv7-${{ steps.version.outputs.version }}.tar.gz" manifest.json
+            echo '```'
+            echo
+            echo '## SHA-256'
+            echo
+            echo '```'
+            cat staging-xione/checksums.txt
+            echo '```'
+          } >release-notes.md
+
+          echo "--- rendered notes ---"
+          cat release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.prerelease == 'true' && format('AAMP XiOne commit build {0}', steps.version.outputs.version) || format('AAMP XiOne {0}', steps.version.outputs.version) }}
+          # Commit builds are prereleases: they exist to be pinned, not to be
+          # treated as blessed versions, and they get deleted when superseded.
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          body_path: release-notes.md
+          files: |
+            staging-xione/*.tar.gz
+            staging-xione/checksums.txt

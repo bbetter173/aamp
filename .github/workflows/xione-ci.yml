@@ -1,0 +1,144 @@
+name: XiOne cross-build
+
+# Builds AAMP for the Sky XiOne and asserts the artifacts are actually loadable
+# on the device. See XIONE-BUILD.md.
+#
+# Scoped by paths: this is a cross-compile of the whole player and takes minutes,
+# so it runs when the sources or the build definition change, not on docs-only
+# PRs. The CMake build is untouched by any of this — //:aamp is
+# target_compatible_with the XiOne board constraint and is skipped in wildcards.
+
+on:
+  pull_request:
+    paths:
+      - "**.c"
+      - "**.cpp"
+      - "**.h"
+      - "**.hpp"
+      - "**/CMakeLists.txt"
+      - "cmake/**"
+      - "middleware/**"
+      - "support/**"
+      - "tsb/**"
+      - "jsbindings/**"
+      - "subtec/**"
+      - "downloader/**"
+      - "BUILD.bazel"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - ".bazelrc"
+      - ".bazelversion"
+      - "bazel/**"
+      - "third_party/**"
+      - "scripts/libdash-patches/**"
+      - "tools/release/**"
+      - ".github/workflows/xione-ci.yml"
+  push:
+    branches: [feat/xione-bazel-build]
+  workflow_dispatch:
+
+concurrency:
+  group: xione-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify (armv7 XiOne)
+    # Linux x86_64 only: the Bootlin cross-compiler ships x86_64 host binaries,
+    # so exec_compatible_with pins linux+x86_64 and an arm runner cannot build.
+    #
+    # GitHub-hosted, not the `gke-arc-aamp` self-hosted set. That label was tried
+    # and is NOT served for this repo: jobs sat queued 8+ minutes with no runner
+    # assigned, the same way rdk-packages hung before its runners existed
+    # (rillanetwork/core-infra#133 provisions the scale set for rdk-packages, not
+    # for this repo). Switching is a one-line change once a listener exists — the
+    # apt step below already tolerates either image.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build requirements
+        # binutils: `ar`, to unwrap the .deb payloads in deb_sysroot.
+        # pkg-config: preferred over rules_foreign_cc's from-source bootstrap,
+        #   which compiles a vendored glib that is invalid under a C23 default.
+        # patchelf: RPATH rewrite in the staging step.
+        run: |
+          # The ARC runner image runs as root without sudo; GitHub-hosted needs
+          # sudo. Pick whichever exists so the workflow runs on either.
+          SUDO=""
+          command -v sudo >/dev/null 2>&1 && SUDO=sudo
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends binutils pkg-config patchelf
+
+      - name: Configure Bazel caches
+        # Caching ~/.cache/bazel wholesale also captured the *output_base*, which is
+        # how a stale `external/` tree survived between runs: it kept a renamed
+        # repository directory alive long enough for CI to pass on a commit that a
+        # clean build fails (see tools/release/stage_artifacts.sh's strip
+        # resolution). Split the two instead, in a user bazelrc so every invocation
+        # picks it up — including the nested ones inside stage_artifacts.sh:
+        #
+        #   repository cache — content-addressed downloads. Safe to share, and it is
+        #     the genuinely slow part (36 debs off snapshot.debian.org, ~500 MB
+        #     toolchain).
+        #   disk cache — action outputs, keyed on action hashes, so Bazel decides
+        #     what is reusable rather than a key I wrote by hand.
+        #
+        # The output_base is never restored, so every run analyses from scratch.
+        run: |
+          mkdir -p "$HOME/bazel-cache/repos" "$HOME/bazel-cache/disk"
+          printf 'common --repository_cache=%s/bazel-cache/repos\ncommon --disk_cache=%s/bazel-cache/disk\n' \
+            "$HOME" "$HOME" > "$HOME/.bazelrc"
+
+      - name: Restore repository cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/bazel-cache/repos
+          # Keyed on what pins the downloads, which is exactly what this cache holds.
+          key: bazel-repos-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
+          restore-keys: |
+            bazel-repos-
+
+      - name: Restore disk cache
+        id: disk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/bazel-cache/disk
+          key: bazel-disk-${{ github.sha }}
+          restore-keys: |
+            bazel-disk-
+
+      - name: Build and verify artifacts
+        # //tools/verify:xione_libs_ok asserts every library is ELF32 ARM hard-float,
+        # that all nine are present, and that the AAMP-internal DT_NEEDED closure is
+        # self-contained. It lives in Bazel rather than here so it is cached, only
+        # re-runs when the libraries change, and can be run locally with the same
+        # command. Building it builds //:aamp.
+        run: |
+          bazelisk build //:aamp //tools/verify:xione_libs_ok \
+            --platforms=//bazel/platforms:xione
+
+      - name: Verify release staging
+        # Exercise the staging path on every run, so an RPATH or packaging
+        # regression surfaces here and not at release time.
+        run: bash tools/release/stage_artifacts.sh --version ci-${{ github.sha }}
+
+      - name: Save repository cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/bazel-cache/repos
+          key: bazel-repos-${{ hashFiles('MODULE.bazel.lock', 'third_party/xione_sysroot/xione-debs.json') }}
+
+      - name: Save disk cache
+        # Pushes write, pull requests only read: PR runs would otherwise each add an
+        # entry and evict the shared one they benefit from.
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/bazel-cache/disk
+          key: bazel-disk-${{ github.sha }}
